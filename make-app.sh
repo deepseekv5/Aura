@@ -222,6 +222,12 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <string>Aura 需要访问通讯录以查找联系人电话号码并发起通话。</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Aura 需要控制音乐 App 来播放歌曲。</string>
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array><string>iCloud.com.aura.backup</string></array>
+    <key>com.apple.developer.ubiquity-container-identifiers</key>
+    <array><string>iCloud.com.aura.backup</string></array>
+    <key>com.apple.developer.icloud-services</key>
+    <array><string>CloudDocuments</string></array>
 </dict>
 </plist>
 EOF

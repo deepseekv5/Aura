@@ -201,6 +201,10 @@ struct AppSettings: Codable {
     var speechRate: Double = 0.5
     /// 启动时自动检查更新
     var autoCheckUpdates: Bool = true
+    /// 自动本地备份
+    var autoBackup: Bool = true
+    /// 自动 iCloud 备份
+    var iCloudBackupEnabled: Bool = false
 
     // MiMo TTS 语音朗读
     var ttsAuto: Bool = false
@@ -241,7 +245,7 @@ struct AppSettings: Codable {
     private enum CodingKeys: String, CodingKey {
         case profiles, activeProfileID, demoMode, userName, userBio, noEmojiReplies, memoryTopK
         case ttsAuto, ttsAPIKey, ttsModel, ttsVoice, ttsVoiceDesign, ttsFormat
-        case accentColorHex, speechRate, autoCheckUpdates
+        case accentColorHex, speechRate, autoCheckUpdates, autoBackup, iCloudBackupEnabled
         case screenEnabled, screenMode, screenPasswordSalt, screenPasswordHash, legalConsentVersion
     }
 

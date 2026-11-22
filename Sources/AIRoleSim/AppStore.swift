@@ -44,6 +44,49 @@ final class AppStore: ObservableObject {
     /// 屏幕读取是否已用密码解锁（内存态，重启后需重新解锁）
     @Published var screenUnlocked = false
 
+    /// 使用统计
+    struct UsageStats {
+        var totalMessages: Int = 0
+        var userMessages: Int = 0
+        var assistantMessages: Int = 0
+        var totalMemories: Int = 0
+        var daysSinceFirstUse: Int = 0
+    }
+
+    func usageStats() -> UsageStats {
+        let all = conversations.flatMap { $0.messages }
+        let first = conversations.map { $0.createdAt }.min() ?? Date()
+        return UsageStats(
+            totalMessages: all.count,
+            userMessages: all.filter { $0.role == .user }.count,
+            assistantMessages: all.filter { $0.role == .assistant }.count,
+            totalMemories: memories.count,
+            daysSinceFirstUse: max(1, Calendar.current.dateComponents([.day], from: first, to: Date()).day ?? 1)
+        )
+    }
+
+    /// 自动本地备份（每次数据变更后调用；保留最近 3 份）
+    func autoLocalBackup() {
+        guard let data = exportAllData() else { return }
+        let dir = dataDir.appendingPathComponent("Backups", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd-HHmmss"
+        let file = dir.appendingPathComponent("auto-\(fmt.string(from: Date())).json")
+        try? data.write(to: file, options: .atomic)
+        // 只保留最近 3 份
+        let files: [URL] = ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey])) ?? [])
+            .filter { $0.lastPathComponent.hasPrefix("auto-") }
+            .sorted { a, b in
+                let da = (try? a.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
+                let db = (try? b.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
+                return da > db
+            }
+        for old in files.dropFirst(3) {
+            try? FileManager.default.removeItem(at: old)
+        }
+    }
+
     let dataDir: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
