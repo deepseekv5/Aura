@@ -214,6 +214,10 @@ final class ChatSessionModel: ObservableObject {
 
     func cancel() {
         task?.cancel()
+        task = nil
+        isStreaming = false
+        statusText = nil
+        pendingText = ""
     }
 
     func send(_ rawText: String, images: [Data] = []) {
@@ -265,14 +269,27 @@ final class ChatSessionModel: ObservableObject {
             pendingText = ""
         }
         do {
+            let settings = store.settings
+            let lastUser = convo.messages.last(where: { $0.role == .user })?.content ?? ""
+            // 群聊工具副作用只执行一次，结果共享给所有角色
+            let sharedPrefetched: [PrefetchedData]
+            if !settings.demoMode {
+                sharedPrefetched = await IntentEngine.prefetchAll(
+                    for: lastUser,
+                    screenEnabled: settings.screenEnabled,
+                    screenUnlocked: settings.screenPasswordHash.isEmpty || store.screenUnlocked
+                )
+            } else {
+                sharedPrefetched = []
+            }
             if convo.isGroup {
                 for memberID in convo.groupMemberIDs {
                     if Task.isCancelled { break }
                     guard store.character(id: memberID) != nil else { continue }
-                    try await respond(characterID: memberID)
+                    try await respond(characterID: memberID, prefetched: sharedPrefetched)
                 }
             } else {
-                try await respond(characterID: convo.characterID)
+                try await respond(characterID: convo.characterID, prefetched: sharedPrefetched)
             }
         } catch is CancellationError {
             // 中断：已生成的部分内容已在 respond 内落库
@@ -281,7 +298,7 @@ final class ChatSessionModel: ObservableObject {
         }
     }
 
-    private func respond(characterID: UUID) async throws {
+    private func respond(characterID: UUID, prefetched: [PrefetchedData] = []) async throws {
         guard let convo = store.conversation(id: conversationID),
               let character = store.character(id: characterID) else { return }
 
@@ -303,11 +320,12 @@ final class ChatSessionModel: ObservableObject {
         }
 
         let memberNames = convo.isGroup ? convo.groupMemberIDs.compactMap { store.character(id: $0)?.displayName } : []
+        let otherMemberNames = convo.isGroup ? convo.groupMemberIDs.filter { $0 != characterID }.compactMap { store.character(id: $0)?.displayName } : []
         let lastUser = convo.messages.last(where: { $0.role == .user })?.content ?? ""
 
         // 基础上下文（system + 全量历史）
         var messages: [ChatRequestMessage] = [
-            .system(PromptBuilder.systemPrompt(store: store, character: character, isGroup: convo.isGroup, memberNames: memberNames, lastUserText: lastUser))
+            .system(PromptBuilder.systemPrompt(store: store, character: character, isGroup: convo.isGroup, memberNames: otherMemberNames, lastUserText: lastUser))
         ]
         messages += PromptBuilder.historyMessages(conversation: convo, store: store)
 
@@ -316,14 +334,8 @@ final class ChatSessionModel: ObservableObject {
             tools.removeAll { $0.function.name == "save_memory" || $0.function.name == "search_memory" }
         }
 
-        // 意图兜底：命中意图时引擎自动获取真实数据并注入（不依赖模型）
-        if !settings.demoMode {
-            let prefetched = await IntentEngine.prefetchAll(
-                for: lastUser,
-                screenEnabled: settings.screenEnabled,
-                screenUnlocked: settings.screenPasswordHash.isEmpty || store.screenUnlocked
-            )
-            if !prefetched.isEmpty {
+        // 意图兜底数据（由 execute 层预取，群聊只执行一次）
+        if !settings.demoMode && !prefetched.isEmpty {
                 statusText = "已自动获取实时数据…"
                 let block = prefetched.map { "[\($0.toolName)]\n\($0.result)" }.joined(separator: "\n\n")
                 let text = "以下是你需要的实时数据（系统已自动获取，可信）：\n\(block)\n请直接基于以上真实数据，以角色口吻自然回答用户；不要为此再次调用相同工具，不要提及 JSON 或系统。"
@@ -339,7 +351,6 @@ final class ChatSessionModel: ObservableObject {
                 }
                 generatedImageNames += prefetched.compactMap { $0.imageName }
             }
-        }
 
         let exchangeIndex = convo.messages.filter { $0.role == .user }.count
 
@@ -382,12 +393,26 @@ final class ChatSessionModel: ObservableObject {
                 decisionRound += 1
                 if Task.isCancelled { break }
                 statusText = decisionRound == 1 ? "思考中…" : "正在执行工具…"
-                let d = try await APIClient.completeOnce(
-                    profile: p,
-                    messages: decision,
-                    tools: tools,
-                    temperature: character.temperatureOverride
-                )
+                let d: (text: String, toolCalls: [CompletedToolCall], finish: String?)
+                do {
+                    d = try await APIClient.completeOnce(
+                        profile: p,
+                        messages: decision,
+                        tools: tools,
+                        temperature: character.temperatureOverride
+                    )
+                } catch let err as APIError {
+                    // 供应商不支持 tools：去掉工具重试一次
+                    if case .http(let code, let body) = err, code == 400,
+                       body.lowercased().contains("tool") {
+                        d = try await APIClient.completeOnce(
+                            profile: p,
+                            messages: decision,
+                            tools: nil,
+                            temperature: character.temperatureOverride
+                        )
+                    } else { throw err }
+                }
                 var calls = d.toolCalls
                 var dtext = d.text ?? ""
                 // 文本型工具调用兜底（GLM 等模型内嵌 <tool_call>）
@@ -441,10 +466,9 @@ final class ChatSessionModel: ObservableObject {
                     iterText2 += d
                     pendingText = PromptBuilder.stripTextToolCalls(PromptBuilder.stripThinking(fullText + iterText2))
                 case .toolCalls(let c):
-                    // 生成阶段若仍出现工具调用（极少），直接执行
+                    // 生成阶段若仍出现工具调用（极少）：执行但不把原始 JSON 暴露给用户
                     for call in c {
-                        let result = await executeTool(call: call, character: character, notes: &notes, imageNames: &generatedImageNames)
-                        fullText += "\n\(result)"
+                        _ = await executeTool(call: call, character: character, notes: &notes, imageNames: &generatedImageNames)
                     }
                 case .finished:
                     break
@@ -485,7 +509,8 @@ final class ChatSessionModel: ObservableObject {
             return try? JSONDecoder().decode(type, from: data)
         }
         func errJSON(_ msg: String) -> String {
-            "{\"error\":\"\(msg.replacingOccurrences(of: "\"", with: "'"))\"}"
+            struct Err: Codable { let error: String }
+            return (try? JSONEncoder().encode(Err(error: msg))).flatMap { String(data: $0, encoding: .utf8) } ?? "{\"error\":\"unknown\"}"
         }
 
         switch call.name {

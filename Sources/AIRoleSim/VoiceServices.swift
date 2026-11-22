@@ -20,13 +20,16 @@ final class SpeechDictationService: NSObject, ObservableObject {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private let audioEngine = AVAudioEngine()
+    private var isStarting = false
+    private var isFinishing = false
 
     func toggle() {
         isListening ? stop() : start()
     }
 
     func start() {
-        guard !isListening else { return }
+        guard !isListening && !isStarting else { return }
+        isStarting = true
         errorMessage = nil
 
         AVCaptureDevice.requestAccess(for: .audio) { [weak self] micGranted in
@@ -34,6 +37,7 @@ final class SpeechDictationService: NSObject, ObservableObject {
             guard micGranted else {
                 DispatchQueue.main.async {
                     self.errorMessage = "麦克风权限未授权：请在 系统设置 → 隐私与安全性 → 麦克风 中允许 Aura"
+                    self.isStarting = false
                 }
                 return
             }
@@ -42,6 +46,7 @@ final class SpeechDictationService: NSObject, ObservableObject {
                     guard let self else { return }
                     guard status == .authorized else {
                         self.errorMessage = "语音识别权限未授权：请在 系统设置 → 隐私与安全性 → 语音识别 中允许 Aura"
+                        self.isStarting = false
                         return
                     }
                     self.beginListening()
@@ -61,7 +66,7 @@ final class SpeechDictationService: NSObject, ObservableObject {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = false
+            request.requiresOnDeviceRecognition = true
         }
         self.request = request
 
@@ -75,6 +80,7 @@ final class SpeechDictationService: NSObject, ObservableObject {
 
         transcript = ""
         isListening = true
+        isStarting = false
         do {
             try audioEngine.start()
         } catch {
@@ -97,6 +103,8 @@ final class SpeechDictationService: NSObject, ObservableObject {
     }
 
     private func finishListening() {
+        if isFinishing { return }
+        isFinishing = true
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         request?.endAudio()
@@ -104,6 +112,8 @@ final class SpeechDictationService: NSObject, ObservableObject {
         request = nil
         task = nil
         isListening = false
+        isStarting = false
+        isFinishing = false
     }
 
     func stop() {
@@ -161,8 +171,11 @@ enum CallService {
             number = phone
         }
 
-        let telURL = URL(string: "tel://\(number.replacingOccurrences(of: "-", with: ""))")
-        guard let telURL else { return json(Result(status: "error", target: target, detail: "号码无效")) }
+        // 号码白名单清洗（防 tel: 注入）+ 长度限制
+        let digits = String(number.filter { "0123456789+#*,".contains($0) }.prefix(24))
+        guard digits.count >= 4, let telURL = URL(string: "tel:" + digits.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)! ) else {
+            return json(Result(status: "error", target: target, detail: "号码无效"))
+        }
         let ok = await MainActor.run { NSWorkspace.shared.open(telURL) }
         return ok
             ? json(Result(

@@ -205,6 +205,7 @@ struct MessageListView: View {
     @ObservedObject var store: AppStore
     @ObservedObject var session: ChatSessionModel
     let conversationID: UUID
+    @State private var isAtBottom = true
 
     var body: some View {
         Group {
@@ -232,10 +233,12 @@ struct MessageListView: View {
                         .padding(.top, 16)
                         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: convo.messages.count)
                     }
-                    .onChange(of: convo.messages.count) { _, _ in scrollToBottom(proxy) }
-                    .onChange(of: session.pendingText) { _, _ in scrollToBottom(proxy) }
-                    .onChange(of: session.statusText) { _, _ in scrollToBottom(proxy) }
+                    .onChange(of: convo.messages.count) { _, _ in if isAtBottom { scrollToBottom(proxy) } }
+                    .onChange(of: session.pendingText) { _, _ in if isAtBottom { scrollToBottom(proxy) } }
                     .onAppear { scrollToBottom(proxy) }
+                    .simultaneousGesture(
+                        DragGesture().onChanged { _ in isAtBottom = false }.onEnded { _ in isAtBottom = true }
+                    )
                 }
             }
         }

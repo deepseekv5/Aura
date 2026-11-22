@@ -348,17 +348,16 @@ struct APIClient {
                     var totalTokens: Int?
                     var streamError: Error?
 
-                    for try await line in bytes.lines {
-                        if Task.isCancelled { break }
-                        guard line.hasPrefix("data:") else { continue }
-                        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
-                        if payload == "[DONE]" { break }
+                    // SSE 规范：同一事件的多个 data: 行需拼接后解析
+                    var eventLines: [String] = []
+                    func processEvent(_ lines: [String]) {
+                        let payload = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !payload.isEmpty, payload != "[DONE]" else { return }
                         guard let data = payload.data(using: .utf8),
-                              let chunk = try? JSONDecoder().decode(ChatCompletionChunk.self, from: data) else { continue }
-
+                              let chunk = try? JSONDecoder().decode(ChatCompletionChunk.self, from: data) else { return }
                         if let err = chunk.error {
                             streamError = APIError.http(200, err.message ?? "未知错误")
-                            break
+                            return
                         }
                         if let usage = chunk.usage?.total_tokens { totalTokens = usage }
                         for choice in chunk.choices ?? [] {
@@ -377,14 +376,34 @@ struct APIClient {
                         }
                     }
 
+                    var sawDone = false
+                    for try await line in bytes.lines {
+                        if Task.isCancelled { throw CancellationError() }
+                        let trimmed = line.trimmingCharacters(in: .whitespaces)
+                        if trimmed.isEmpty {
+                            if !eventLines.isEmpty { processEvent(eventLines); eventLines = [] }
+                            continue
+                        }
+                        guard trimmed.hasPrefix("data:") else { continue }
+                        let payload = trimmed.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                        if payload == "[DONE]" { sawDone = true; break }
+                        eventLines.append(payload)
+                    }
+                    if !eventLines.isEmpty { processEvent(eventLines) }
+                    _ = sawDone
+
                     if let e = streamError { throw e }
 
                     let calls: [CompletedToolCall] = acc.keys.sorted().compactMap { idx in
                         guard let c = acc[idx], !c.name.isEmpty else { return nil }
+                        // 工具参数必须是合法 JSON；finish=length 时丢弃（截断）
+                        let args = c.args.trimmingCharacters(in: .whitespaces)
+                        let isValidJSON = args.isEmpty || (args.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }) != nil
+                        guard isValidJSON, finish != "length" else { return nil }
                         return CompletedToolCall(
                             id: c.id.isEmpty ? "call_\(idx)" : c.id,
                             name: c.name,
-                            arguments: c.args.isEmpty ? "{}" : c.args
+                            arguments: args.isEmpty ? "{}" : args
                         )
                     }
                     if !calls.isEmpty {
@@ -695,6 +714,28 @@ struct APIClient {
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([:])
+            ])
+        )),
+        ToolSpec(function: ToolFunctionSpec(
+            name: "generate_image",
+            description: "生成一张图片并展示给用户。用户想画图、生成海报、头像、插图时使用（免费，无需 Key）。",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "prompt": .object([
+                        "type": .string("string"),
+                        "description": .string("图片描述，如：海边日落，有帆船和椰子树")
+                    ]),
+                    "width": .object([
+                        "type": .string("integer"),
+                        "description": .string("宽度，默认 768")
+                    ]),
+                    "height": .object([
+                        "type": .string("integer"),
+                        "description": .string("高度，默认 768")
+                    ])
+                ]),
+                "required": .array([.string("prompt")])
             ])
         )),
         ToolSpec(function: ToolFunctionSpec(

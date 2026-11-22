@@ -11,6 +11,9 @@ struct MemoryInspector: View {
     @State private var categoryFilter = "全部"
     @State private var summarizeStatus: String?
     @State private var pendingDelete: MemoryEntry?
+    @State private var sortBy: MemorySort = .newest
+    @State private var selectedMemories: Set<UUID> = []
+    @State private var showBatchDelete = false
 
     private var character: RoleProfile? { store.selectedCharacter() }
     private var allMemories: [MemoryEntry] {
@@ -21,7 +24,8 @@ struct MemoryInspector: View {
     }
     private var filtered: [MemoryEntry] {
         let q = store.inspectorQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return allMemories.filter { m in
+        let result = store.sortedMemories(for: character?.id ?? UUID(), by: sortBy)
+        return result.filter { m in
             (categoryFilter == "全部" || m.category == categoryFilter)
                 && (q.isEmpty || m.content.lowercased().contains(q))
         }
@@ -51,12 +55,15 @@ struct MemoryInspector: View {
                     }
                     ForEach(filtered) { m in
                         MemoryCard(memory: m)
-                            .contextMenu { cardMenu(m) }
-                            .onTapGesture {
-                                editingMemory = m
-                                creatingNew = false
-                                showEditor = true
+                            .overlay(alignment: .topLeading) {
+                                if selectedMemories.contains(m.id) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(Color.accentColor)
+                                        .padding(4)
+                                }
                             }
+                            .contextMenu { cardMenu(m) }
+                            .onTapGesture { toggleSelection(m) }
                     }
                 }
                 .padding(.vertical, 4)
@@ -68,6 +75,16 @@ struct MemoryInspector: View {
                 characterID: character?.id ?? UUID(),
                 memory: creatingNew ? nil : editingMemory
             )
+        }
+        .confirmationDialog(
+            "删除选中的 \(selectedMemories.count) 条记忆？",
+            isPresented: $showBatchDelete,
+            titleVisibility: .visible
+        ) {
+            Button("删除", role: .destructive) {
+                store.deleteMemories(ids: selectedMemories)
+                selectedMemories.removeAll()
+            }
         }
         .confirmationDialog(
             "删除这条记忆？",
@@ -149,6 +166,22 @@ struct MemoryInspector: View {
             }
             .buttonStyle(.borderless)
             .fixedSize()
+            Menu {
+                ForEach(MemorySort.allCases) { sort in
+                    Button(sort.rawValue) { sortBy = sort }
+                }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+            .help("排序")
+            if !selectedMemories.isEmpty {
+                Button("删除 \(selectedMemories.count) 条") { showBatchDelete = true }
+                    .font(.system(size: 11))
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.red)
+            }
         }
     }
 
@@ -162,6 +195,17 @@ struct MemoryInspector: View {
             }
             Divider()
             Button("删除", role: .destructive) { pendingDelete = m }
+        }
+    }
+
+    private func toggleSelection(_ m: MemoryEntry) {
+        if selectedMemories.contains(m.id) {
+            selectedMemories.remove(m.id)
+        } else {
+            // 单击进入编辑， multidimensional 选择需 command 键
+            editingMemory = m
+            creatingNew = false
+            showEditor = true
         }
     }
 

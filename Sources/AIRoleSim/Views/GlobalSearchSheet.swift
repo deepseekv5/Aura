@@ -5,9 +5,8 @@ struct GlobalSearchSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""
+    @State private var results = SearchResults()
     @FocusState private var focused: Bool
-
-    private var results: SearchResults { store.searchAll(query) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,6 +53,26 @@ struct GlobalSearchSheet: View {
         }
         .frame(width: 580, height: 500)
         .onAppear { focused = true }
+        .onChange(of: query) { _, newValue in
+            Task {
+                try? await Task.sleep(nanoseconds: 200_000_000) // 200ms 防抖
+                if !Task.isCancelled {
+                    results = store.searchAll(newValue)
+                }
+            }
+        }
+        .onSubmit {
+            // 回车选中首个结果
+            if let c = results.characters.first {
+                store.selectCharacter(c.id)
+                dismiss()
+            } else if let m = results.memories.first {
+                store.selectCharacter(m.characterID)
+                store.inspectorQuery = query
+                store.showMemoryInspector = true
+                dismiss()
+            }
+        }
     }
 
     private var characterSection: some View {

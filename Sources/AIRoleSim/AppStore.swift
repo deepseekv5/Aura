@@ -115,14 +115,31 @@ final class AppStore: ObservableObject {
     /// 保存图片，返回文件名；失败返回 nil
     func saveImageData(_ data: Data) -> String? {
         try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
-        let name = UUID().uuidString + ".jpg"
+        // 按实际格式命名
+        let ext: String
+        if data.prefix(3).elementsEqual([0xFF, 0xD8, 0xFF]) { ext = "jpg" }
+        else if String(decoding: data.prefix(8), as: UTF8.self).contains("PNG") { ext = "png" }
+        else if data.prefix(6).elementsEqual(Array("GIF89a".utf8)) { ext = "gif" }
+        else { ext = "img" }
+        let name = UUID().uuidString + "." + ext
         let url = imagesDir.appendingPathComponent(name)
         guard (try? data.write(to: url, options: .atomic)) != nil else { return nil }
         return name
     }
 
+    /// 路径安全：仅接受纯文件名（防 ../ 目录穿越）
     func imageURL(named name: String) -> URL {
-        imagesDir.appendingPathComponent(name)
+        let safe = (name as NSString).lastPathComponent
+        return imagesDir.appendingPathComponent(safe)
+    }
+
+    /// 清理没有消息引用的图片文件
+    func cleanupOrphanImages() {
+        let referenced = Set(conversations.flatMap { $0.messages.flatMap { $0.imagePaths } })
+        guard let files = try? FileManager.default.contentsOfDirectory(at: imagesDir, includingPropertiesForKeys: nil) else { return }
+        for file in files where !referenced.contains(file.lastPathComponent) {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     private var charactersURL: URL { dataDir.appendingPathComponent("characters.json") }
@@ -131,37 +148,65 @@ final class AppStore: ObservableObject {
     private var configURL: URL { dataDir.appendingPathComponent("config.json") }
 
     private func loadAll() {
-        if let data = try? Data(contentsOf: configURL) {
-            settings = (try? decoder.decode(AppSettings.self, from: data)) ?? .standard
+        // 解码失败时保留损坏文件并备份，避免写回空数据永久丢失
+        func load<T: Decodable>(_ url: URL, as type: T.Type, fallback: T, label: String) -> T {
+            guard let data = try? Data(contentsOf: url) else { return fallback }
+            do {
+                return try decoder.decode(type, from: data)
+            } catch {
+                let backup = url.appendingPathExtension("corrupt-\(Int(Date().timeIntervalSince1970))")
+                try? FileManager.default.copyItem(at: url, to: backup)
+                NSLog("Aura: \(label) 解码失败，已备份到 \(backup.lastPathComponent): \(error)")
+                return fallback
+            }
         }
-        if let data = try? Data(contentsOf: charactersURL) {
-            characters = (try? decoder.decode([RoleProfile].self, from: data)) ?? []
-        }
-        if let data = try? Data(contentsOf: conversationsURL) {
-            conversations = (try? decoder.decode([Conversation].self, from: data)) ?? []
-        }
-        if let data = try? Data(contentsOf: memoriesURL) {
-            memories = (try? decoder.decode([MemoryEntry].self, from: data)) ?? []
-        }
+        settings = load(configURL, as: AppSettings.self, fallback: .standard, label: "配置")
+        characters = load(charactersURL, as: [RoleProfile].self, fallback: [], label: "角色")
+        conversations = load(conversationsURL, as: [Conversation].self, fallback: [], label: "会话")
+        memories = load(memoriesURL, as: [MemoryEntry].self, fallback: [], label: "记忆")
         // 历史迁移：旧版默认 2048，统一提升到 8192
         for i in settings.profiles.indices where settings.profiles[i].maxTokens < 4096 {
             settings.profiles[i].maxTokens = 8192
         }
     }
 
+    private let writeQueue = DispatchQueue(label: "com.aura.store.write", qos: .utility)
+
     private func persist<T: Encodable>(_ value: T, to url: URL, restrictive: Bool = false) {
-        guard let data = try? encoder.encode(value) else { return }
-        Task.detached(priority: .utility) {
-            try? data.write(to: url, options: .atomic)
-            if restrictive {
-                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        guard let data = try? encoder.encode(value) else {
+            NSLog("Aura: 编码失败 \(url.lastPathComponent)")
+            return
+        }
+        // 串行写队列：保证写入顺序，避免旧快照覆盖新数据
+        writeQueue.async {
+            do {
+                try data.write(to: url, options: .atomic)
+                if restrictive {
+                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+                }
+            } catch {
+                NSLog("Aura: 写入失败 \(url.lastPathComponent): \(error)")
             }
         }
     }
 
-    private func persistCharacters() { persist(characters, to: charactersURL) }
-    private func persistConversations() { persist(conversations, to: conversationsURL) }
-    private func persistMemories() { persist(memories, to: memoriesURL) }
+    private var backupTimer: DispatchWorkItem?
+
+    private func persistCharacters() { persist(characters, to: charactersURL); scheduleAutoBackup() }
+    private func persistConversations() { persist(conversations, to: conversationsURL); scheduleAutoBackup() }
+    private func persistMemories() { persist(memories, to: memoriesURL); scheduleAutoBackup() }
+
+    /// 数据变更后节流触发自动本地备份（5 秒合并一次突发变更）
+    private func scheduleAutoBackup() {
+        guard settings.autoBackup else { return }
+        backupTimer?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.settings.autoBackup else { return }
+            self.autoLocalBackup()
+        }
+        backupTimer = work
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: work)
+    }
 
     // MARK: - 角色管理
 
@@ -181,14 +226,31 @@ final class AppStore: ObservableObject {
 
     func deleteCharacter(_ c: RoleProfile) {
         characters.removeAll { $0.id == c.id }
-        conversations.removeAll { $0.characterID == c.id || c.id != $0.characterID && $0.groupMemberIDs.contains(c.id) && $0.groupMemberIDs.count <= 1 }
+        // 群聊：移除幽灵成员、重选发起人、成员 < 2 才删除；单聊：直接删除
+        var kept: [Conversation] = []
+        for conv in conversations {
+            if conv.isGroup {
+                var copy = conv
+                copy.groupMemberIDs.removeAll { $0 == c.id }
+                // 过滤已不存在的角色
+                copy.groupMemberIDs.removeAll { id in !characters.contains { $0.id == id } }
+                if copy.groupMemberIDs.count < 2 { continue } // 删除该群聊
+                if copy.characterID == c.id { copy.characterID = copy.groupMemberIDs[0] }
+                kept.append(copy)
+            } else if conv.characterID != c.id {
+                kept.append(conv)
+            }
+        }
+        conversations = kept
         memories.removeAll { $0.characterID == c.id }
         persistCharacters()
         persistConversations()
         persistMemories()
-        if selectedCharacterID == c.id {
-            selectedCharacterID = nil
-            selectedConversationID = nil
+        cleanupOrphanImages()
+        // 选择态回退
+        if selectedCharacterID == c.id { selectedCharacterID = nil }
+        if let sel = selectedConversationID, !conversations.contains(where: { $0.id == sel }) {
+            selectedConversationID = conversations(for: selectedCharacterID ?? UUID()).first?.id
         }
     }
 
@@ -259,7 +321,7 @@ final class AppStore: ObservableObject {
         guard let id = selectedCharacterID else { return }
         let c = createConversation(characterID: id)
         if let char = character(id: id), !char.greeting.isEmpty {
-            appendMessage(to: c.id, ChatMessage(role: .assistant, content: char.greeting, speakerID: char.id, modelUsed: "开场白"))
+            appendMessage(to: c.id, ChatMessage(role: .assistant, content: char.greeting, modelUsed: "开场白"))
         }
     }
 
@@ -324,9 +386,16 @@ final class AppStore: ObservableObject {
         source: String
     ) -> MemoryEntry {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 内容去重：AI 重复保存时不重复落库
-        if let existing = memories.first(where: { $0.characterID == characterID && $0.content == trimmed }) {
-            return existing
+        // Upsert：相同内容时更新元数据而非直接返回旧条目
+        if let idx = memories.firstIndex(where: { $0.characterID == characterID && $0.content == trimmed }) {
+            var updated = memories[idx]
+            updated.category = category.isEmpty ? "其他" : category
+            updated.importance = min(max(importance, 1), 5)
+            updated.pinned = pinned || updated.pinned
+            updated.source = source
+            memories[idx] = updated
+            persistMemories()
+            return updated
         }
         let m = MemoryEntry(
             characterID: characterID,
@@ -359,6 +428,23 @@ final class AppStore: ObservableObject {
         updateMemory(copy)
     }
 
+    /// 批量删除记忆
+    func deleteMemories(ids: Set<UUID>) {
+        memories.removeAll { ids.contains($0.id) }
+        persistMemories()
+    }
+
+    /// 记忆按指定字段排序（供 UI 展示）
+    func sortedMemories(for characterID: UUID, by criterion: MemorySort) -> [MemoryEntry] {
+        let list = memories(for: characterID)
+        switch criterion {
+        case .newest: return list.sorted { $0.createdAt > $1.createdAt }
+        case .importance: return list.sorted { $0.importance != $1.importance ? $0.importance > $1.importance : $0.createdAt > $1.createdAt }
+        case .usage: return list.sorted { $0.useCount > $1.useCount }
+        case .category: return list.sorted { $0.category < $1.category }
+        }
+    }
+
     func clearMemories(characterID: UUID) {
         memories.removeAll { $0.characterID == characterID }
         persistMemories()
@@ -380,8 +466,9 @@ final class AppStore: ObservableObject {
 
     func summarizeMemories(for characterID: UUID) async throws -> Int {
         guard let char = character(id: characterID) else { return 0 }
-        let convo = conversations(for: characterID).first
-        let recent = Array((convo?.messages ?? []).suffix(40))
+        // 合并该角色全部会话的近期消息（按时间排序）
+        let allMessages = conversations(for: characterID).flatMap { $0.messages }
+        let recent = Array(allMessages.sorted { $0.createdAt < $1.createdAt }.suffix(60))
         guard !recent.isEmpty else { return 0 }
 
         let who: (ChatMessage) -> String = { [weak self] msg in
@@ -538,13 +625,18 @@ final class AppStore: ObservableObject {
 
     /// 导出全部用户数据为 JSON（不含图片二进制，仅文件名；含全部设置）
     func exportAllData() -> Data? {
+        // 使用统一配置的 encoder（iso8601 日期），保证导入闭环
+        guard let sd = try? encoder.encode(settings),
+              let cd = try? encoder.encode(characters),
+              let cod = try? encoder.encode(conversations),
+              let md = try? encoder.encode(memories) else { return nil }
         let payload: [String: Any] = [
             "version": 1,
             "exportedAt": ISO8601DateFormatter().string(from: Date()),
-            "settings": (try? JSONEncoder().encode(settings)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? [:],
-            "characters": (try? JSONEncoder().encode(characters)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? [],
-            "conversations": (try? JSONEncoder().encode(conversations)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? [],
-            "memories": (try? JSONEncoder().encode(memories)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? []
+            "settings": (try? JSONSerialization.jsonObject(with: sd)) ?? [:],
+            "characters": (try? JSONSerialization.jsonObject(with: cd)) ?? [],
+            "conversations": (try? JSONSerialization.jsonObject(with: cod)) ?? [],
+            "memories": (try? JSONSerialization.jsonObject(with: md)) ?? []
         ]
         return try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
     }

@@ -49,11 +49,11 @@ struct MarkdownView: View {
 
             // 表格：当前行以 | 开头，下一行是分隔行
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("|"), i + 1 < lines.count, isTableSeparator(lines[i + 1]) {
+            if trimmed.contains("|"), i + 1 < lines.count, isTableSeparator(lines[i + 1]) {
                 let header = parseTableRow(trimmed)
                 var rows: [[String]] = []
                 i += 2
-                while i < lines.count, lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("|") {
+                while i < lines.count, lines[i].trimmingCharacters(in: .whitespaces).contains("|") {
                     rows.append(parseTableRow(lines[i].trimmingCharacters(in: .whitespaces)))
                     i += 1
                 }
@@ -118,7 +118,7 @@ struct MarkdownView: View {
         let t = line.trimmingCharacters(in: .whitespaces)
         guard t.hasPrefix("#") else { return nil }
         let level = t.prefix(while: { $0 == "#" }).count
-        guard level >= 1 && level <= 4, let first = t.first, first == "#" else { return nil }
+        guard level >= 1 && level <= 6, let first = t.first, first == "#" else { return nil }
         let text = t.drop(while: { $0 == "#" }).trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return nil }
         return .heading(level: level, text: String(text))
@@ -143,8 +143,8 @@ struct MarkdownView: View {
 
     private func isTableSeparator(_ line: String) -> Bool {
         let t = line.trimmingCharacters(in: .whitespaces)
-        guard t.hasPrefix("|") else { return false }
-        let inner = t.dropFirst().dropLast(t.hasSuffix("|") ? 1 : 0)
+        guard t.contains("|") else { return false }
+        let inner = t.trimmingCharacters(in: CharacterSet(charactersIn: "|"))
         return inner.split(separator: "|").allSatisfy { cell in
             let c = cell.trimmingCharacters(in: .whitespaces)
             return !c.isEmpty && Set(c).isSubset(of: ["-", ":"])

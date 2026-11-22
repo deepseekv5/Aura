@@ -110,7 +110,11 @@ struct ChatMessage: Identifiable, Codable, Hashable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        role = try c.decodeIfPresent(Role.self, forKey: .role) ?? .user
+        if let roleStr = try c.decodeIfPresent(String.self, forKey: .role) {
+            role = Role(rawValue: roleStr) ?? (roleStr == "assistant" ? .assistant : .user)
+        } else {
+            role = .user
+        }
         content = try c.decodeIfPresent(String.self, forKey: .content) ?? ""
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         speakerID = try c.decodeIfPresent(UUID.self, forKey: .speakerID)
@@ -265,6 +269,11 @@ struct AppSettings: Codable {
         ttsVoice = try c.decodeIfPresent(String.self, forKey: .ttsVoice) ?? "mimo_default"
         ttsVoiceDesign = try c.decodeIfPresent(String.self, forKey: .ttsVoiceDesign) ?? ""
         ttsFormat = try c.decodeIfPresent(String.self, forKey: .ttsFormat) ?? "mp3"
+        accentColorHex = try c.decodeIfPresent(String.self, forKey: .accentColorHex) ?? ""
+        speechRate = try c.decodeIfPresent(Double.self, forKey: .speechRate) ?? 0.5
+        autoCheckUpdates = try c.decodeIfPresent(Bool.self, forKey: .autoCheckUpdates) ?? true
+        autoBackup = try c.decodeIfPresent(Bool.self, forKey: .autoBackup) ?? true
+        iCloudBackupEnabled = try c.decodeIfPresent(Bool.self, forKey: .iCloudBackupEnabled) ?? false
         screenEnabled = try c.decodeIfPresent(Bool.self, forKey: .screenEnabled) ?? false
         screenMode = try c.decodeIfPresent(String.self, forKey: .screenMode) ?? "full"
         screenPasswordSalt = try c.decodeIfPresent(String.self, forKey: .screenPasswordSalt) ?? ""
@@ -286,4 +295,15 @@ struct AppSettings: Codable {
         }
         return activeProfile()
     }
+}
+
+
+// MARK: - 排序方式
+
+enum MemorySort: String, CaseIterable, Identifiable {
+    case newest = "最新"
+    case importance = "重要度"
+    case usage = "使用次数"
+    case category = "分类"
+    var id: String { rawValue }
 }

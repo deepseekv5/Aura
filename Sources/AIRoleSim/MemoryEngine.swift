@@ -67,7 +67,8 @@ struct MemoryEngine {
     /// 关键词命中加分（独立计算，便于判断是否发生了语义匹配）
     static func keywordBonus(_ m: MemoryEntry, queryTokens: Set<String>) -> Double {
         var bonus = 0.0
-        for t in queryTokens where t.count >= 2 {
+        for t in queryTokens.sorted() {
+            if t.count < 2 { continue }
             if m.content.localizedCaseInsensitiveContains(t) {
                 bonus += t.count >= 3 ? 8 : 6
             }
@@ -97,26 +98,30 @@ struct MemoryEngine {
     ) -> [MemoryEntry] {
         let mine = entries.filter { $0.characterID == characterID }
         guard !mine.isEmpty else { return [] }
+        // 稳定顺序：排序 token 后累加，保证同查询同结果
         let tokens = Set(tokenize(query))
         let now0 = now
 
         let scored = mine.map { m -> (MemoryEntry, Double, Double) in
-            let bonus = keywordBonus(m, queryTokens: tokens)
-            let base = score(m, queryTokens: tokens, now: now0)
+            let bonus = keywordBonus(m, queryTokens: tokens) // 只算一次
+            var base = Double(m.importance) * 1.2
+            if m.pinned { base += 12 } // 置顶加权，而非无上限附带
+            let ref = m.lastUsedAt ?? m.createdAt
+            let days = max(0, now0.timeIntervalSince(ref) / 86400)
+            base += exp(-days / 45) * 6
+            base += min(Double(m.useCount), 10) * 0.4
             return (m, base + bonus, bonus)
         }
 
-        let matched = scored.filter { $0.2 > 0 }
-        let picked: [MemoryEntry]
-        if !matched.isEmpty {
-            picked = matched.sorted { $0.1 > $1.1 }.prefix(limit).map { $0.0 }
-        } else {
-            picked = scored.sorted { $0.1 > $1.1 }.prefix(limit).map { $0.0 }
-        }
-
-        // 置顶记忆始终附带（去重）
-        let pinned = mine.filter { $0.pinned && !picked.contains($0) }
-        return pinned + picked
+        // 统一按总分排序取前 limit，置顶已加权，结果不超上限
+        let picked = scored
+            .sorted { a, b in
+                if a.1 != b.1 { return a.1 > b.1 }
+                return a.0.id.uuidString < b.0.id.uuidString // 稳定 tiebreak
+            }
+            .prefix(max(1, limit))
+            .map { $0.0 }
+        return picked
     }
 
     /// 生成注入系统提示的记忆文本块

@@ -115,7 +115,9 @@ final class AudioPlayerManager: NSObject, ObservableObject {
     private var player: AVAudioPlayer?
     private let synthesizer = AVSpeechSynthesizer()
     private var cache: [UUID: Data] = [:]
+    private var cacheOrder: [UUID] = []
     private var speakingMessageID: UUID?
+    private var generation: Int = 0  // 防异步竞态
 
     override private init() {
         super.init()
@@ -132,11 +134,11 @@ final class AudioPlayerManager: NSObject, ObservableObject {
         stop()
         guard !message.content.isEmpty else { return }
 
+        let gen = generation
         playingMessageID = id
         lastError = nil
         do {
             if settings.demoMode {
-                // 演示模式：系统语音兜底，真实可听
                 speakSystem(text: message.content, id: id, rate: settings.speechRate)
                 return
             }
@@ -150,20 +152,31 @@ final class AudioPlayerManager: NSObject, ObservableObject {
                 data = c
             } else {
                 data = try await TTSService.synthesize(text: message.content, settings: settings)
+                guard generation == gen else { return } // 期间被 stop/新请求取代
                 cache[id] = data
+                cacheOrder.removeAll { $0 == id }
+                cacheOrder.append(id)
+                if cacheOrder.count > 20, let oldest = cacheOrder.first {
+                    cache.removeValue(forKey: oldest)
+                    cacheOrder.removeFirst()
+                }
             }
+            guard generation == gen else { return }
             let p = try AVAudioPlayer(data: data)
             p.delegate = self
             p.prepareToPlay()
             p.play()
             player = p
         } catch {
-            playingMessageID = nil
-            lastError = error.localizedDescription
+            if generation == gen {
+                playingMessageID = nil
+                lastError = error.localizedDescription
+            }
         }
     }
 
     func stop() {
+        generation += 1
         player?.stop()
         player = nil
         if synthesizer.isSpeaking {
@@ -199,6 +212,7 @@ final class AudioPlayerManager: NSObject, ObservableObject {
 extension AudioPlayerManager: AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
+            guard self.player === player else { return }
             self.playingMessageID = nil
         }
     }

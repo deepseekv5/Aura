@@ -43,7 +43,7 @@ struct SettingsView: View {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !q.isEmpty else { return SectionID.allCases }
         return SectionID.allCases.filter {
-            $0.rawValue.lowercased().contains(q) || $0.keywords.contains(q)
+            $0.rawValue.lowercased().contains(q) || $0.keywords.lowercased().contains(q)
         }
     }
 
@@ -56,6 +56,11 @@ struct SettingsView: View {
         }
         .frame(width: 780, height: 620)
         .onAppear { searchFocused = false }
+        .onChange(of: searchText) { _, _ in
+            if !filteredSections.contains(selection), let first = filteredSections.first {
+                selection = first
+            }
+        }
     }
 
     // MARK: 侧栏

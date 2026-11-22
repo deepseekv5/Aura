@@ -32,7 +32,9 @@ enum UpdateService {
     }
 
     static let repo = "deepseekv5/Aura"
-    static let currentVersion = "1.2.1"
+    static var currentVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2.2"
+    }
 
     /// 检查更新（仅访问固定 GitHub API 主机，HTTPS）
     static func check() async throws -> UpdateInfo? {
@@ -50,7 +52,7 @@ enum UpdateService {
         let release = try JSONDecoder().decode(Release.self, from: data)
 
         // 版本比较：语义版本号数值比较
-        guard versionNumber(release.tag_name) > versionNumber(currentVersion) else { return nil }
+        guard isNewer(release.tag_name, than: currentVersion) else { return nil }
 
         // 优先 macOS zip asset
         guard let asset = release.assets.first(where: { $0.name.lowercased().contains("macos") && $0.name.lowercased().hasSuffix(".zip") })
@@ -68,15 +70,20 @@ enum UpdateService {
         )
     }
 
-    private static func versionNumber(_ s: String) -> Int {
-        let nums = s.replacingOccurrences(of: "v", with: "")
+    private static func versionTuple(_ s: String) -> [Int] {
+        s.replacingOccurrences(of: "v", with: "")
             .split(separator: ".")
-            .compactMap { Int($0) }
-        var v = 0
-        for (i, n) in nums.prefix(3).enumerated() {
-            v += n * [1_000_000, 1_000, 1][i]
+            .map { Int($0.trimmingCharacters(in: .letters)) ?? 0 }
+    }
+
+    private static func isNewer(_ remote: String, than local: String) -> Bool {
+        let a = versionTuple(remote), b = versionTuple(local)
+        for i in 0..<max(a.count, b.count) {
+            let av = i < a.count ? a[i] : 0
+            let bv = i < b.count ? b[i] : 0
+            if av != bv { return av > bv }
         }
-        return v
+        return false
     }
 
     /// 下载更新（校验所有重定向目标主机，仅 HTTPS + GitHub 白名单）

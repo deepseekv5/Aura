@@ -54,12 +54,10 @@ enum IntentEngine {
         let han = text
 
         // 音乐停止
-        if ["别放了", "停止播放", "暂停音乐", "把音乐停", "别播了", "停止音乐", "关掉音乐"].contains(where: { han.contains($0) }) {
-            actions.append(.musicStop)
-            return actions
-        }
+        let wantsStopMusic = ["别放了", "停止播放", "暂停音乐", "把音乐停", "别播了", "停止音乐", "关掉音乐"].contains(where: { han.contains($0) })
+        if wantsStopMusic { actions.append(.musicStop) }
         // 音乐播放（书名号优先）
-        if han.contains("歌") || han.contains("音乐") || han.contains("曲") || han.lowercased().contains("music") {
+        if !wantsStopMusic && (han.contains("歌") || han.contains("音乐") || han.contains("曲") || han.lowercased().contains("music")) {
             let songs = extractMatches(han, pattern: "《([^》]+)》")
             if let first = songs.first {
                 actions.append(.musicPlay(title: first, artist: nil))
@@ -80,7 +78,10 @@ enum IntentEngine {
             actions.append(.time)
         }
         // 计算
-        if let expr = extractMathExpression(han) {
+        // 排除纯日期（2026-11-22）与电话号码（138-0013-8000）误判
+        let isDateLike = han.range(of: "(19|20)\\d{2}-\\d{1,2}-\\d{1,2}", options: .regularExpression) != nil
+        let isPhoneLike = han.range(of: "1[3-9]\\d{1,2}-\\d{3,4}-\\d{3,4}", options: .regularExpression) != nil
+        if !isDateLike && !isPhoneLike, let expr = extractMathExpression(han) {
             actions.append(.calculate(expression: expr))
         }
         // 随机数 / 骰子 / 硬币
@@ -169,9 +170,9 @@ enum IntentEngine {
     /// 画图意图（强制执行优先）："画海边""来画海边吧""画一张猫""帮我画日落，椰子树"
     static func extractImagePrompt(_ text: String) -> String? {
         // 明确拒绝时不再强制出图
-        if text.range(of: "别画|不要画|不用画|不想画|别生成|不要生成") != nil { return nil }
+        if text.range(of: "别画|不要画|不用画|不想画|别生成|不要生成", options: .regularExpression) != nil { return nil }
         // 能力询问类（"你能画图吗"）：直接给一张通用示例图，体现强制执行
-        if text.range(of: "能画|会画|可以画|画图吗|能生成图|会生成图") != nil {
+        if text.range(of: "能画|会画|可以画|画图吗|能生成图|会生成图", options: .regularExpression) != nil {
             return "一张简洁可爱的插画，色彩柔和"
         }
         guard text.range(of: "画|绘|生成.{0,8}图|来.{0,6}张", options: .regularExpression) != nil else { return nil }
@@ -348,25 +349,22 @@ enum CalculatorService {
     }
 
     static func calculate(_ raw: String) -> String {
-        // 白名单清洗：仅保留数字与安全运算符
         let allowed = Set("0123456789+-*/().% ")
-        let cleaned = raw.filter { allowed.contains($0) }
-        guard !cleaned.isEmpty else {
-            return encode(Result(expression: raw, value: "", ok: false))
+        let cleaned = String(raw.filter { allowed.contains($0) }).trimmingCharacters(in: .whitespaces)
+        guard !cleaned.isEmpty else { return encode(Result(expression: raw, value: "", ok: false)) }
+        // 语法预检：括号配对 + 不允许连续运算符开头/结尾
+        var depth = 0
+        for ch in cleaned {
+            if ch == "(" { depth += 1; if depth > 16 { return encode(Result(expression: cleaned, value: "", ok: false)) } }
+            if ch == ")" { depth -= 1; if depth < 0 { return encode(Result(expression: cleaned, value: "", ok: false)) } }
         }
-        // percent 归一化（NSExpression 不支持 % 后缀）
-        let expr = cleaned.replacingOccurrences(of: "%", with: "/100.0")
-        let e = NSExpression(format: expr)
-        guard let value = e.expressionValue(with: nil, context: nil) else {
-            return encode(Result(expression: expr, value: "", ok: false))
+        guard depth == 0 else { return encode(Result(expression: cleaned, value: "", ok: false)) }
+        var parser = SafeCalc(cleaned)
+        guard let value = parser.parse(), parser.isAtEnd else {
+            return encode(Result(expression: cleaned, value: "", ok: false))
         }
-        let str: String
-        if let d = value as? Double {
-            str = d.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(d)) : String(format: "%.6g", d)
-        } else {
-            str = "\(value)"
-        }
-        return encode(Result(expression: expr, value: str, ok: true))
+        let str = value.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(value)) : String(format: "%.6g", value)
+        return encode(Result(expression: cleaned, value: str, ok: true))
     }
 
     private static func encode(_ r: Result) -> String {
@@ -494,5 +492,79 @@ enum ReminderService {
 
     private static func json(_ r: Result) -> String {
         (try? JSONEncoder().encode(r)).flatMap { String(data: $0, encoding: .utf8) } ?? "{\"status\":\"error\"}"
+    }
+}
+
+
+// MARK: - 安全四则运算解析器（不用 NSExpression，绝不崩溃）
+private struct SafeCalc {
+    private let chars: [Character]
+    private var pos = 0
+
+    init(_ s: String) { chars = Array(s) }
+    var isAtEnd: Bool { pos >= chars.count }
+
+    mutating func parse() -> Double? {
+        let v = expr()
+        return v.isFinite ? v : nil
+    }
+
+    private mutating func skipSpace() {
+        while pos < chars.count && chars[pos] == " " { pos += 1 }
+    }
+
+    private mutating func expr() -> Double {
+        var v = term()
+        while true {
+            skipSpace()
+            guard pos < chars.count else { break }
+            let op = chars[pos]
+            if op != "+" && op != "-" { break }
+            pos += 1
+            let r = term()
+            v = op == "+" ? v + r : v - r
+        }
+        return v
+    }
+
+    private mutating func term() -> Double {
+        var v = factor()
+        while true {
+            skipSpace()
+            guard pos < chars.count else { break }
+            let op = chars[pos]
+            if op != "*" && op != "/" && op != "%" { break }
+            pos += 1
+            let r = factor()
+            if op == "*" { v *= r }
+            else if op == "/" { guard r != 0 else { return .nan }; v /= r }
+            else { guard r != 0 else { return .nan }; v = v.truncatingRemainder(dividingBy: r) }
+        }
+        return v
+    }
+
+    private mutating func factor() -> Double {
+        skipSpace()
+        guard pos < chars.count else { return .nan }
+        if chars[pos] == "(" {
+            pos += 1
+            let v = expr()
+            skipSpace()
+            if pos < chars.count && chars[pos] == ")" { pos += 1 }
+            return v
+        }
+        // 支持负号
+        if chars[pos] == "-" {
+            pos += 1
+            return -factor()
+        }
+        let start = pos
+        var hasDigit = false
+        while pos < chars.count && (chars[pos].isNumber || chars[pos] == ".") {
+            if chars[pos].isNumber { hasDigit = true }
+            pos += 1
+        }
+        guard hasDigit, let d = Double(String(chars[start..<pos])) else { return .nan }
+        return d
     }
 }

@@ -36,6 +36,9 @@ enum HostGuard {
         if a == 192 && b == 168 { return true }
         if a == 100 && (64...127).contains(b) { return true }  // CGNAT
         if a == 198 && (b == 18 || b == 19) { return true }    // 基准测试
+        if a == 192 && b == 0 { return true }             // IETF 协议分配
+        if a == 203 && b == 0 && nums[2] == 113 { return true } // TEST-NET-3
+        if a == 198 && b == 51 && nums[2] == 100 { return true } // TEST-NET-2
         if a >= 224 { return true }                       // 组播/保留
         return false
     }
@@ -44,6 +47,8 @@ enum HostGuard {
         let l = s.lowercased()
         if l == "::" || l == "::1" { return true }
         if l.hasPrefix("fe80") || l.hasPrefix("fc") || l.hasPrefix("fd") || l.hasPrefix("ff") { return true }
+        if l.contains("::ffff:") || l.hasPrefix("::") && !l.hasSuffix("::") { return true } // IPv4-mapped/兼容
+        if l.hasPrefix("64:ff9b:") { return true } // NAT64
         return false
     }
 }
@@ -170,7 +175,7 @@ enum WeatherService {
             var desc: String
             var days: [WeatherService.DayInfo]
         }
-        var c = URLComponents(string: "https://wttr.in/\(city.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? city)")!
+        var c = URLComponents(string: "https://wttr.in/\(city.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? city)")!
         c.queryItems = [.init(name: "format", value: "j1")]
         guard let url = c.url else { return "{\"error\":\"无效城市\"}" }
         do {
@@ -539,7 +544,7 @@ enum ImageGenService {
 
     /// 返回 (图片数据, 工具结果 JSON)
     static func generate(prompt: String, width: Int = 768, height: Int = 768) async -> (Data?, String) {
-        var c = URLComponents(string: "https://image.pollinations.ai/prompt/\(prompt.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? prompt)")!
+        var c = URLComponents(string: "https://image.pollinations.ai/prompt/\(prompt.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? prompt)")!
         c.queryItems = [
             .init(name: "width", value: String(min(1024, max(256, width)))),
             .init(name: "height", value: String(min(1024, max(256, height)))),

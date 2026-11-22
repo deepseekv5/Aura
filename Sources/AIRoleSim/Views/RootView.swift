@@ -43,6 +43,7 @@ struct RootView: View {
                     }
                 }
             }
+            .interactiveDismissDisabled(true)
         }
         .sheet(isPresented: $showAPIConfigGuide) {
             APIConfigGuideView { showAPIConfigGuide = false }
