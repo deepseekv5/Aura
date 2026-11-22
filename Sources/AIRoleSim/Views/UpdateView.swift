@@ -45,7 +45,7 @@ struct UpdateView: View {
                         }
                         .controlSize(.small)
                         Spacer()
-                        Button(downloading ? "下载中…" : "下载并安装") {
+                        Button(downloading ? "下载中…" : "下载新版") {
                             Task { await install(info) }
                         }
                         .buttonStyle(.glassProminent)
@@ -107,7 +107,7 @@ struct UpdateView: View {
         message = "正在下载…"
         do {
             let newApp = try await UpdateService.download(info) { _ in }
-            message = "正在安装…"
+            message = "新版已下载并打开所在文件夹。请退出 Aura，将新版拖入应用程序文件夹覆盖旧版。"
             _ = try await UpdateService.install(newApp: newApp)
         } catch {
             self.error = error.localizedDescription

@@ -523,19 +523,51 @@ struct DataSettingsPane: View {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "Aura-backup-\(ISO8601DateFormatter().string(from: Date()).prefix(10)).json"
-        panel.begin { r in
+        panel.message = "选择备份文件的保存位置（默认建议放在桌面或文稿）"
+        panel.prompt = "导出"
+
+        // 绑定到当前 keyWindow，避免在 sheet 弹窗中不显示
+        let window = NSApp.keyWindow
+        let done: (NSApplication.ModalResponse) -> Void = { r in
             guard r == .OK, let url = panel.url else { return }
-            try? data.write(to: url)
-            dataStatus = "已导出到 \(url.lastPathComponent)"
+            do {
+                try data.write(to: url, options: .atomic)
+                dataStatus = "已导出：\(url.path)"
+                // 在访达中显示导出位置
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } catch {
+                dataStatus = "写入失败：\(error.localizedDescription)"
+            }
+        }
+        if let window {
+            panel.beginSheetModal(for: window, completionHandler: done)
+        } else {
+            panel.begin(completionHandler: done)
         }
     }
 
     private func importData() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
-        panel.begin { r in
-            guard r == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
-            dataStatus = store.importAllData(data) ? "导入成功，数据已恢复" : "备份格式无效"
+        panel.allowsMultipleSelection = false
+        panel.message = "选择 Aura 备份文件（Aura-backup-日期.json）"
+        panel.prompt = "导入"
+
+        let window = NSApp.keyWindow
+        let done: (NSApplication.ModalResponse) -> Void = { r in
+            guard r == .OK, let url = panel.url else { return }
+            guard let data = try? Data(contentsOf: url) else {
+                dataStatus = "无法读取：\(url.lastPathComponent)"
+                return
+            }
+            dataStatus = store.importAllData(data)
+                ? "导入成功，数据已恢复（来自 \(url.lastPathComponent)）"
+                : "备份格式无效：\(url.lastPathComponent)"
+        }
+        if let window {
+            panel.beginSheetModal(for: window, completionHandler: done)
+        } else {
+            panel.begin(completionHandler: done)
         }
     }
 

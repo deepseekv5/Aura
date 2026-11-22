@@ -32,7 +32,7 @@ enum UpdateService {
     }
 
     static let repo = "deepseekv5/Aura"
-    static let currentVersion = "1.2.0"
+    static let currentVersion = "1.2.1"
 
     /// 检查更新（仅访问固定 GitHub API 主机，HTTPS）
     static func check() async throws -> UpdateInfo? {
@@ -79,11 +79,36 @@ enum UpdateService {
         return v
     }
 
-    /// 下载更新并返回解压后的 .app 路径
+    /// 下载更新（校验所有重定向目标主机，仅 HTTPS + GitHub 白名单）
+    /// 返回解压后的 .app 路径
     static func download(_ info: UpdateInfo, progress: @escaping (Double) -> Void) async throws -> URL {
-        let (data, resp) = try await APIClient.dataWithRetry(URLRequest(url: info.downloadURL))
+        // 主机白名单：下载起点与所有重定向目标必须是 GitHub 官方域名
+        let allowedHosts: Set<String> = [
+            "github.com", "www.github.com", "objects.githubusercontent.com",
+            "release-assets.githubusercontent.com", "github-releases.githubusercontent.com"
+        ]
+
+        func validate(_ url: URL) throws {
+            guard let scheme = url.scheme?.lowercased(), scheme == "https" else {
+                throw APIError.invalidURL("更新地址必须使用 HTTPS：\(url.absoluteString)")
+            }
+            guard let host = url.host?.lowercased(), allowedHosts.contains(host) else {
+                throw APIError.invalidURL("更新地址主机不在白名单：\(url.host ?? "未知")")
+            }
+        }
+
+        try validate(info.downloadURL)
+
+        let delegate = RedirectGuard(validate: validate)
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+
+        let (data, resp) = try await session.data(for: URLRequest(url: info.downloadURL))
         guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
             throw APIError.http((resp as? HTTPURLResponse)?.statusCode ?? -1, "下载失败")
+        }
+        guard data.count > 100_000 else {
+            throw APIError.decoding("下载文件过小，可能不是有效的安装包")
         }
         progress(1.0)
 
@@ -93,58 +118,62 @@ enum UpdateService {
         let zip = tmp.appendingPathComponent("update.zip")
         try data.write(to: zip)
 
-        // 用 ditto 解压（macOS 原生，保留资源分支）
+        // ditto 解压（保留 macOS 资源分支与隔离属性）
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
         p.arguments = ["-x", "-k", zip.path, tmp.path]
-        p.standardError = FileHandle.nullDevice
+        let errPipe = Pipe()
+        p.standardError = errPipe
         try p.run()
         p.waitUntilExit()
-        guard p.terminationStatus == 0 else { throw APIError.decoding("解压失败") }
+        guard p.terminationStatus == 0 else {
+            let msg = String(decoding: errPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            throw APIError.decoding("解压失败：\(msg)")
+        }
 
-        let contents = (try? FileManager.default.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil)) ?? []
-        guard let app = contents.first(where: { $0.pathExtension == "app" }) else {
+        // 递归查找 .app（zip 内可能多一层目录）
+        func findApp(in dir: URL, depth: Int) -> URL? {
+            guard depth < 3 else { return nil }
+            let items = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+            if let app = items.first(where: { $0.pathExtension == "app" }) { return app }
+            for sub in items where sub.hasDirectoryPath {
+                if let found = findApp(in: sub, depth: depth + 1) { return found }
+            }
+            return nil
+        }
+        guard let app = findApp(in: tmp, depth: 0) else {
             throw APIError.decoding("安装包中没有找到 .app")
         }
         return app
     }
 
-    /// 安装更新：若当前 app 可写则原子替换并重启；否则提示手动
+    /// 安装更新（不自动替换应用，改为打开新版所在文件夹让用户手动拖入，最安全）
     @discardableResult
     static func install(newApp: URL) async throws -> Bool {
-        let bundle = Bundle.main.bundleURL
-        let parent = bundle.deletingLastPathComponent()
-
-        guard FileManager.default.isWritableFile(atPath: parent.path) else {
-            // /Applications 等只读位置：打开访达 + 提示手动替换
-            await MainActor.run {
-                NSWorkspace.shared.open(newApp.deletingLastPathComponent())
-                let alert = NSAlert()
-                alert.messageText = "请手动完成更新"
-                alert.informativeText = "新版已下载并打开所在文件夹。请退出 Aura，将新版拖入应用程序文件夹覆盖旧版。"
-                alert.addButton(withTitle: "好")
-                alert.runModal()
-            }
-            return false
-        }
-
-        // 可写位置：备份旧版 → 替换 → 重启
-        let backup = bundle.appendingPathExtension("old")
-        try? FileManager.default.removeItem(at: backup)
-        try FileManager.default.moveItem(at: bundle, to: backup)
-        do {
-            try FileManager.default.copyItem(at: newApp, to: bundle)
-        } catch {
-            try? FileManager.default.moveItem(at: backup, to: bundle)
-            throw error
-        }
-        try? FileManager.default.removeItem(at: backup)
-
-        // 重新打开
         await MainActor.run {
-            NSWorkspace.shared.open(bundle)
-            NSApp.terminate(nil)
+            // 在新版所在文件夹里选中它
+            NSWorkspace.shared.activateFileViewerSelecting([newApp])
         }
-        return true
+        return false // 未自动安装
+    }
+}
+
+/// 重定向守卫：每一跳都校验 URL（HTTPS + 主机白名单）
+private final class RedirectGuard: NSObject, URLSessionTaskDelegate {
+    let validate: (URL) throws -> Void
+
+    init(validate: @escaping (URL) throws -> Void) {
+        self.validate = validate
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        guard let url = request.url, (try? validate(url)) != nil else {
+            completionHandler(nil) // 拒绝非法重定向
+            return
+        }
+        completionHandler(request)
     }
 }
