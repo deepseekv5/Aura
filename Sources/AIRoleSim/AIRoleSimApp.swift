@@ -25,6 +25,9 @@ struct AIRoleSimApp: App {
                 Button("全局搜索") { store.showSearch = true }
                     .keyboardShortcut("k", modifiers: .command)
             }
+            CommandMenu("帮助") {
+                Button("检查更新…") { NotificationCenter.default.post(name: .showUpdateView, object: nil) }
+            }
         }
 
         Settings {

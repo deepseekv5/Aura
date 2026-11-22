@@ -4,6 +4,9 @@ struct RootView: View {
     @EnvironmentObject var store: AppStore
     /// 首次启动法律同意（版本 v1.0）
     @State private var showLegalConsent = false
+    /// API 未配置引导（默认 API 模式）
+    @State private var showAPIConfigGuide = false
+    @State private var showUpdateView = false
 
     var body: some View {
         NavigationSplitView {
@@ -33,12 +36,45 @@ struct RootView: View {
             LegalConsentView {
                 store.settings.legalConsentVersion = "1.0"
                 showLegalConsent = false
+                // 同意后立即检查 API 配置
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    if !store.settings.demoMode && !store.hasUsableAPIConfig() {
+                        showAPIConfigGuide = true
+                    }
+                }
             }
+        }
+        .sheet(isPresented: $showAPIConfigGuide) {
+            APIConfigGuideView { showAPIConfigGuide = false }
+        }
+        .sheet(isPresented: $showUpdateView) {
+            UpdateView()
         }
         .onAppear {
             if store.settings.legalConsentVersion.isEmpty {
                 showLegalConsent = true
+            } else if !store.settings.demoMode && !store.hasUsableAPIConfig() {
+                showAPIConfigGuide = true
             }
+            // 启动自动检查更新（延迟 3 秒，不打扰首屏）
+            if store.settings.autoCheckUpdates {
+                Task {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    if let info = try? await UpdateService.check(), info != nil {
+                        await MainActor.run { showUpdateView = true }
+                    }
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showUpdateView)) { _ in
+            showUpdateView = true
+        }
+        // 当用户在设置中完成配置或开启演示模式后，自动关闭引导
+        .onChange(of: store.hasUsableAPIConfig()) { _, has in
+            if has { showAPIConfigGuide = false }
+        }
+        .onChange(of: store.settings.demoMode) { _, demo in
+            if demo { showAPIConfigGuide = false }
         }
     }
 }

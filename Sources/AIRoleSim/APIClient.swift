@@ -13,7 +13,7 @@ enum APIError: LocalizedError {
         case .invalidURL(let u): return "API 地址无效：\(u)"
         case .http(let code, let body): return "请求失败（HTTP \(code)）：\(body)"
         case .decoding(let m): return "响应解析失败：\(m)"
-        case .notConfigured: return "API 未配置：请在设置中填写 Base URL、API Key 与模型名，或开启演示模式"
+        case .notConfigured: return "API 未配置：请在设置中填写 Base URL、API Key 与模型名（也可临时开启演示模式体验）"
         }
     }
 }

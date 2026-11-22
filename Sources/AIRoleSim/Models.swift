@@ -189,7 +189,7 @@ struct APIProfile: Identifiable, Codable, Hashable {
 struct AppSettings: Codable {
     var profiles: [APIProfile] = []
     var activeProfileID: UUID?
-    var demoMode: Bool = true
+    var demoMode: Bool = false
     var userName: String = ""
     var userBio: String = ""
     var noEmojiReplies: Bool = true
@@ -199,6 +199,8 @@ struct AppSettings: Codable {
     var accentColorHex: String = ""
     /// 朗读语速 0.4-1.0
     var speechRate: Double = 0.5
+    /// 启动时自动检查更新
+    var autoCheckUpdates: Bool = true
 
     // MiMo TTS 语音朗读
     var ttsAuto: Bool = false
@@ -239,7 +241,7 @@ struct AppSettings: Codable {
     private enum CodingKeys: String, CodingKey {
         case profiles, activeProfileID, demoMode, userName, userBio, noEmojiReplies, memoryTopK
         case ttsAuto, ttsAPIKey, ttsModel, ttsVoice, ttsVoiceDesign, ttsFormat
-        case accentColorHex, speechRate
+        case accentColorHex, speechRate, autoCheckUpdates
         case screenEnabled, screenMode, screenPasswordSalt, screenPasswordHash, legalConsentVersion
     }
 
@@ -248,7 +250,7 @@ struct AppSettings: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         profiles = try c.decodeIfPresent([APIProfile].self, forKey: .profiles) ?? AppSettings.standard.profiles
         activeProfileID = try c.decodeIfPresent(UUID.self, forKey: .activeProfileID)
-        demoMode = try c.decodeIfPresent(Bool.self, forKey: .demoMode) ?? true
+        demoMode = try c.decodeIfPresent(Bool.self, forKey: .demoMode) ?? false
         userName = try c.decodeIfPresent(String.self, forKey: .userName) ?? ""
         userBio = try c.decodeIfPresent(String.self, forKey: .userBio) ?? ""
         noEmojiReplies = try c.decodeIfPresent(Bool.self, forKey: .noEmojiReplies) ?? true

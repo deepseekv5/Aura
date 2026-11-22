@@ -190,6 +190,7 @@ struct SettingsView: View {
     }
 
     @State private var dataStatus: String?
+    @State private var showUpdateView = false
 
     private func exportData() {
         guard let data = store.exportAllData() else { dataStatus = "导出失败"; return }
@@ -331,6 +332,19 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 34)
                 }
+            }
+
+            Section("软件更新") {
+                HStack {
+                    Text("当前版本 v\(UpdateService.currentVersion)")
+                        .font(.system(size: 12))
+                    Spacer()
+                    Button("检查更新") { showUpdateView = true }
+                        .buttonStyle(.glass)
+                        .controlSize(.small)
+                }
+                Toggle("启动时自动检查更新", isOn: $store.settings.autoCheckUpdates)
+                    .font(.system(size: 12))
             }
 
             Section("数据") {

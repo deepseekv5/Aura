@@ -410,6 +410,12 @@ final class AppStore: ObservableObject {
 
     // MARK: - 配置
 
+    /// 是否存在可用的 API 配置（非演示模式下未配置则应弹出引导）
+    func hasUsableAPIConfig() -> Bool {
+        guard let p = settings.activeProfile() else { return false }
+        return !p.baseURL.isEmpty && !p.apiKey.isEmpty && !p.model.isEmpty
+    }
+
     func effectiveProfile(for character: RoleProfile) -> APIProfile? {
         guard let p = settings.profile(for: character) else { return nil }
         guard !p.baseURL.isEmpty, !p.model.isEmpty else { return nil }
