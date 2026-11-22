@@ -341,6 +341,19 @@ struct GeneralSettingsPane: View {
                 Toggle("回复避免 emoji", isOn: $store.settings.noEmojiReplies)
                 Stepper("每轮注入记忆：\(store.settings.memoryTopK) 条", value: $store.settings.memoryTopK, in: 4...16)
             }
+            SettingsCard(title: "上下文窗口") {
+                Picker("窗口大小", selection: $store.settings.contextWindowTokens) {
+                    Text("128K").tag(128_000)
+                    Text("256K").tag(256_000)
+                    Text("512K").tag(512_000)
+                    Text("1M（默认）").tag(1_000_000)
+                    Text("2M").tag(2_000_000)
+                    Text("4M").tag(4_000_000)
+                }
+                Toggle("超限时自动压缩历史", isOn: $store.settings.contextAutoCompress)
+                Text("每轮对话会把历史按预算裁剪后发送；1M 上下文可容纳约 150 万汉字。若模型实际支持更小窗口，请在 API 配置中调整 max tokens。")
+                    .font(.system(size: 10.5)).foregroundStyle(.tertiary)
+            }
             SettingsCard(title: "软件更新") {
                 HStack {
                     Text("当前 v\(UpdateService.currentVersion)").font(.system(size: 12))

@@ -111,6 +111,7 @@ final class AppStore: ObservableObject {
     }
 
     var imagesDir: URL { dataDir.appendingPathComponent("images", isDirectory: true) }
+    var portraitsDir: URL { dataDir.appendingPathComponent("portraits", isDirectory: true) }
 
     /// 保存图片，返回文件名；失败返回 nil
     func saveImageData(_ data: Data) -> String? {
@@ -125,6 +126,31 @@ final class AppStore: ObservableObject {
         let url = imagesDir.appendingPathComponent(name)
         guard (try? data.write(to: url, options: .atomic)) != nil else { return nil }
         return name
+    }
+
+    /// 保存角色肖像（PNG/JPEG），返回文件名
+    func savePortrait(_ data: Data, ext: String = "png") -> String? {
+        try? FileManager.default.createDirectory(at: portraitsDir, withIntermediateDirectories: true)
+        let name = UUID().uuidString + "." + ext
+        let url = portraitsDir.appendingPathComponent(name)
+        guard (try? data.write(to: url, options: .atomic)) != nil else { return nil }
+        return name
+    }
+
+    /// 静态共享路径（供 Monogram 等无 store 引用的视图使用）
+    static func portraitURLShared(named name: String) -> URL? {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = support.appendingPathComponent("AIRoleSim/portraits", isDirectory: true)
+        let safe = (name as NSString).lastPathComponent
+        let url = dir.appendingPathComponent(safe)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    func portraitURL(named name: String) -> URL? {
+        guard !name.isEmpty else { return nil }
+        let safe = (name as NSString).lastPathComponent
+        let url = portraitsDir.appendingPathComponent(safe)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     /// 路径安全：仅接受纯文件名（防 ../ 目录穿越）

@@ -10,6 +10,7 @@ struct ChatView: View {
 
     @State private var draft = ""
     @State private var pendingImages: [Data] = []
+    @State private var showContextSettings = false
     @State private var blinkOn = true
 
     init(store: AppStore, conversationID: UUID) {
@@ -66,7 +67,10 @@ struct ChatView: View {
                         }
                     }
                 }
-                .navigationTitle(convo.isGroup ? convo.title : (ownerCharacter?.displayName ?? "对话"))
+                .sheet(isPresented: $showContextSettings) {
+            ContextInfoSheet()
+        }
+        .navigationTitle(convo.isGroup ? convo.title : (ownerCharacter?.displayName ?? "对话"))
                 .navigationSubtitle(convo.isGroup ? (ownerCharacter?.displayName ?? "") : convo.title)
                 .toolbar { toolbarItems(convo) }
             } else {
@@ -177,6 +181,27 @@ struct ChatView: View {
                 Image(systemName: "brain")
             }
             .help("记忆面板")
+
+            // 上下文用量指示：颜色随占比变化
+            if let usage = session.lastUsage {
+                Menu {
+                    Text("上下文用量：\(usage.estimatedTokens.formatted()) / \(usage.budget.formatted()) tokens")
+                    Text("占比 \(usage.percentText) · \(usage.messageCount) 条消息")
+                    if usage.truncatedCount > 0 {
+                        Text("已裁剪 \(usage.truncatedCount) 条早期消息")
+                    }
+                    Divider()
+                    Button("调整上下文设置") { showContextSettings = true }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chart.bar.fill")
+                        Text(usage.percentText)
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(usage.fraction > 0.9 ? .red : usage.fraction > 0.7 ? .orange : .secondary)
+                    }
+                }
+                .help("上下文用量")
+            }
 
             Button {
                 store.editCharacter(convo.characterID)
@@ -320,7 +345,7 @@ struct MessageRow: View {
         VStack(alignment: .leading, spacing: 6) {
             if isGroup {
                 HStack(spacing: 6) {
-                    Monogram(text: speaker?.displayName ?? "角色", colorHex: speaker?.colorHex ?? "#8A8F98", size: 15)
+                    Monogram(text: speaker?.displayName ?? "角色", colorHex: speaker?.colorHex ?? "#8A8F98", size: 15, portraitPath: speaker?.portraitPath ?? "")
                     Text(speaker?.displayName ?? "角色")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
@@ -576,5 +601,65 @@ struct EditMessageSheet: View {
         }
         .padding(16)
         .frame(width: 470)
+    }
+}
+
+/// 上下文说明弹窗：解释用量含义与设置入口
+struct ContextInfoSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var store: AppStore
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Color.accentColor)
+                Text("上下文窗口")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+            }
+            Text("上下文窗口决定了每轮对话最多能带多少历史、记忆和指令给模型。Aura 默认 1M（约 150 万汉字），并在超限时自动裁剪早期消息，避免请求过大失败。")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Label("当前设置", systemImage: "gearshape")
+                    .font(.system(size: 12, weight: .medium))
+                HStack {
+                    Text("窗口大小")
+                    Spacer()
+                    Text("\(store.settings.contextWindowTokens.formatted()) tokens")
+                        .foregroundStyle(.secondary)
+                }
+                .font(.system(size: 12))
+                HStack {
+                    Text("自动压缩")
+                    Spacer()
+                    Text(store.settings.contextAutoCompress ? "已开启" : "已关闭")
+                        .foregroundStyle(store.settings.contextAutoCompress ? .green : .orange)
+                }
+                .font(.system(size: 12))
+            }
+            .padding(12)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            Text("调整位置：设置 → 通用 → 上下文窗口。若你的模型实际支持的上下文较小，请相应调低窗口并将 max tokens 设为输出上限。")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+
+            HStack {
+                Spacer()
+                Button("前往设置") {
+                    dismiss()
+                    openSettings()
+                }
+                .buttonStyle(.glassProminent)
+                Button("关闭") { dismiss() }
+            }
+        }
+        .padding(18)
+        .frame(width: 420)
     }
 }

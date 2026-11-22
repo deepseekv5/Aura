@@ -42,7 +42,7 @@ enum PromptBuilder {
             )
         }
         lines.append(
-            "【真实世界能力（工具）】\n- get_weather(city)：查某城市实时天气与三天预报；用户提到天气、出门、穿衣时必须查询，不要编造。\n- get_news(topic)：查新闻资讯，可指定话题；聊到时事、热点时查询。\n- web_search(query)：联网搜索，不确定的事实、词条、背景资料都应搜索。\n- calculate(expression)：精确数学计算，涉及运算时必须使用，不要心算。\n- random_number(min, max, label)：随机数、掷骰子、抛硬币、抽签。\n- play_music(title, artist) / stop_music()：用本机音乐 App 播放/停止歌曲。\n- get_current_time()：查当前日期时间星期，涉及时间时查询。\n- set_reminder(minutes, text)：设定本地通知提醒，用户说『X分钟后提醒我…』时使用。\n- generate_image(prompt)：生成图片并展示给用户，用户想看图、画图、生成海报头像时使用。\n- read_screen(mode)：截取并查看用户屏幕（需要用户开启）。\n- open_url(url)：在浏览器打开网址。\n- read_clipboard()：读取剪贴板文字或图片。\n- system_info()：查电脑系统状态、电量、内存、磁盘。\n拿到结果后用自然口语转述，融入角色语气，不要罗列原始数据。"
+            "【真实世界能力（工具）】\n- get_weather(city)：查某城市实时天气与三天预报；用户提到天气、出门、穿衣时必须查询，不要编造。\n- get_news(topic)：查新闻资讯，可指定话题；聊到时事、热点时查询。\n- web_search(query)：联网搜索，不确定的事实、词条、背景资料都应搜索。\n- calculate(expression)：精确数学计算，涉及运算时必须使用，不要心算。\n- random_number(min, max, label)：随机数、掷骰子、抛硬币、抽签。\n- play_music(title, artist) / stop_music()：用本机音乐 App 播放/停止歌曲。\n- make_call(target)：发起电话通话，target 可以是电话号码或通讯录姓名；说「打电话给张三」「拨打10086」时使用，系统会通过 iPhone 接续。\n- get_current_time()：查当前日期时间星期，涉及时间时查询。\n- set_reminder(minutes, text)：设定本地通知提醒，用户说『X分钟后提醒我…』时使用。\n- generate_image(prompt)：生成图片并展示给用户，用户想看图、画图、生成海报头像时使用。\n- read_screen(mode)：截取并查看用户屏幕（需要用户开启）。\n- open_url(url)：在浏览器打开网址。\n- read_clipboard()：读取剪贴板文字或图片。\n- system_info()：查电脑系统状态、电量、内存、磁盘。\n拿到结果后用自然口语转述，融入角色语气，不要罗列原始数据。"
         )
         lines.append(
             "【工具执行铁律】\n- 用户请求以上任何能力时，必须立刻调用对应工具执行，禁止只说『我可以……』而不执行，禁止用『你想要什么样的？』这类问题拖延——用户说画什么就画什么（如「来画海边吧」→ 立即 generate_image(prompt=\"海边\")），画完再说话。\n- 唯一例外：放歌但完全不知道歌名时，可以追问一次歌名；查天气但完全不知道城市名时，可以追问一次城市。\n- 除此之外一律先执行、后说话；执行结果用一两句话自然收尾，贴合角色语气。"
@@ -201,6 +201,7 @@ final class ChatSessionModel: ObservableObject {
     @Published var isStreaming = false
     @Published var statusText: String?
     @Published var errorMessage: String?
+    @Published var lastUsage: ContextManager.Usage?
 
     private var task: Task<Void, Never>?
 
@@ -323,11 +324,26 @@ final class ChatSessionModel: ObservableObject {
         let otherMemberNames = convo.isGroup ? convo.groupMemberIDs.filter { $0 != characterID }.compactMap { store.character(id: $0)?.displayName } : []
         let lastUser = convo.messages.last(where: { $0.role == .user })?.content ?? ""
 
-        // 基础上下文（system + 全量历史）
-        var messages: [ChatRequestMessage] = [
-            .system(PromptBuilder.systemPrompt(store: store, character: character, isGroup: convo.isGroup, memberNames: otherMemberNames, lastUserText: lastUser))
-        ]
-        messages += PromptBuilder.historyMessages(conversation: convo, store: store)
+        // 基础上下文（system + 历史，按上下文预算裁剪）
+        let systemText = PromptBuilder.systemPrompt(store: store, character: character, isGroup: convo.isGroup, memberNames: otherMemberNames, lastUserText: lastUser)
+        var messages: [ChatRequestMessage] = [.system(systemText)]
+
+        let budget = settings.contextWindowTokens
+        let (fitted, truncated, compressed) = ContextManager.fitHistory(
+            allMessages: convo.messages,
+            systemTokens: ContextManager.estimateTokens(systemText),
+            memoryTokens: 0,
+            budget: budget,
+            autoCompress: settings.contextAutoCompress
+        )
+        let fittedConvo = conversationWithMessages(convo, messages: fitted)
+        messages += PromptBuilder.historyMessages(conversation: fittedConvo, store: store)
+        if compressed && truncated > 0 { statusText = "已压缩 \(truncated) 条早期消息以适配上下文" }
+
+        // 记录上下文用量（供 UI 显示）
+        await MainActor.run {
+            self.lastUsage = ContextManager.usage(messages: messages, budget: budget, truncated: truncated, compressed: compressed)
+        }
 
         var tools = APIClient.memoryTools
         if !character.memoryEnabled {
@@ -503,6 +519,12 @@ final class ChatSessionModel: ObservableObject {
         pendingText = ""
     }
 
+    private func conversationWithMessages(_ c: Conversation, messages: [ChatMessage]) -> Conversation {
+        var copy = c
+        copy.messages = messages
+        return copy
+    }
+
     private func executeTool(call: CompletedToolCall, character: RoleProfile, notes: inout [String], imageNames: inout [String]) async -> String {
         func decode<T: Codable>(_ type: T.Type) -> T? {
             guard let data = call.arguments.data(using: .utf8) else { return nil }
@@ -566,8 +588,10 @@ final class ChatSessionModel: ObservableObject {
 
         case "make_call":
             guard let args = decode(CallArgs.self) else { return errJSON("参数无法解析") }
-            statusText = "正在发起通话…"
-            return await CallService.call(target: args.target)
+            statusText = "正在呼叫 \(args.target)…"
+            let result = await CallService.call(target: args.target)
+            statusText = "已发起呼叫，请在系统弹窗确认"
+            return result
 
         case "open_url":
             guard let args = decode(OpenURLArgs.self) else { return errJSON("参数无法解析") }

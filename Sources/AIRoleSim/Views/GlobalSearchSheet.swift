@@ -89,7 +89,7 @@ struct GlobalSearchSheet: View {
                             dismiss()
                         } label: {
                             HStack(spacing: 10) {
-                                Monogram(text: c.name, colorHex: c.colorHex, size: 22)
+                                Monogram(text: c.name, colorHex: c.colorHex, size: 22, portraitPath: c.portraitPath)
                                 Text(c.displayName).font(.system(size: 13))
                                 Spacer()
                                 Image(systemName: "chevron.right")

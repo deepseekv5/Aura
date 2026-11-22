@@ -6,6 +6,8 @@ struct RoleProfile: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
     var name: String = ""
     var colorHex: String = "#5B8DEF"
+    /// 写实肖像文件名（存于 portraits/），空表示用首字头像
+    var portraitPath: String = ""
     var persona: String = ""
     var scenario: String = ""
     var greeting: String = ""
@@ -199,6 +201,10 @@ struct AppSettings: Codable {
     var noEmojiReplies: Bool = true
     /// 每轮注入的记忆条数
     var memoryTopK: Int = 8
+    /// 上下文窗口大小（token），默认 1M
+    var contextWindowTokens: Int = 1_000_000
+    /// 是否自动压缩超限历史
+    var contextAutoCompress: Bool = true
     /// 全局强调色（十六进制），空表示系统默认
     var accentColorHex: String = ""
     /// 朗读语速 0.4-1.0
@@ -247,7 +253,7 @@ struct AppSettings: Codable {
     }()
 
     private enum CodingKeys: String, CodingKey {
-        case profiles, activeProfileID, demoMode, userName, userBio, noEmojiReplies, memoryTopK
+        case profiles, activeProfileID, demoMode, userName, userBio, noEmojiReplies, memoryTopK, contextWindowTokens, contextAutoCompress
         case ttsAuto, ttsAPIKey, ttsModel, ttsVoice, ttsVoiceDesign, ttsFormat
         case accentColorHex, speechRate, autoCheckUpdates, autoBackup, iCloudBackupEnabled
         case screenEnabled, screenMode, screenPasswordSalt, screenPasswordHash, legalConsentVersion
@@ -263,6 +269,8 @@ struct AppSettings: Codable {
         userBio = try c.decodeIfPresent(String.self, forKey: .userBio) ?? ""
         noEmojiReplies = try c.decodeIfPresent(Bool.self, forKey: .noEmojiReplies) ?? true
         memoryTopK = try c.decodeIfPresent(Int.self, forKey: .memoryTopK) ?? 8
+        contextWindowTokens = try c.decodeIfPresent(Int.self, forKey: .contextWindowTokens) ?? 1_000_000
+        contextAutoCompress = try c.decodeIfPresent(Bool.self, forKey: .contextAutoCompress) ?? true
         ttsAuto = try c.decodeIfPresent(Bool.self, forKey: .ttsAuto) ?? false
         ttsAPIKey = try c.decodeIfPresent(String.self, forKey: .ttsAPIKey) ?? ""
         ttsModel = try c.decodeIfPresent(String.self, forKey: .ttsModel) ?? "mimo-v2.5-tts"

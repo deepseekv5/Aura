@@ -11,6 +11,9 @@ struct CharacterEditorSheet: View {
     @State private var draft = RoleProfile()
     @State private var tagText = ""
     @State private var overrideTemp = false
+    @State private var portraitBusy = false
+    @State private var portraitStatus = ""
+    @State private var portraitHint = ""
 
     private let templates: [CharacterTemplate] = CharacterTemplate.presets
 
@@ -44,9 +47,49 @@ struct CharacterEditorSheet: View {
                     }
                 }
 
+                Section("肖像（让角色有一张真实的脸）") {
+                    HStack(spacing: 12) {
+                        Monogram(text: draft.name.isEmpty ? "角" : draft.name, colorHex: draft.colorHex, size: 72, portraitPath: draft.portraitPath)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("真人肖像")
+                                .font(.system(size: 12, weight: .medium))
+                            if portraitBusy {
+                                HStack(spacing: 6) {
+                                    ProgressView().scaleEffect(0.6)
+                                    Text(portraitStatus).font(.system(size: 11)).foregroundStyle(.secondary)
+                                }
+                            } else {
+                                HStack(spacing: 8) {
+                                    Button(draft.portraitPath.isEmpty ? "生成肖像" : "换一张") { generatePortrait(regenerate: true) }
+                                        .buttonStyle(.glass)
+                                        .controlSize(.small)
+                                        .disabled(draft.name.isEmpty || portraitBusy)
+                                    Button("上传图片") { pickPortrait() }
+                                        .buttonStyle(.glass)
+                                        .controlSize(.small)
+                                    if !draft.portraitPath.isEmpty {
+                                        Button("移除", role: .destructive) {
+                                            if let url = store.portraitURL(named: draft.portraitPath) {
+                                                try? FileManager.default.removeItem(at: url)
+                                            }
+                                            draft.portraitPath = ""
+                                        }
+                                        .controlSize(.small)
+                                    }
+                                }
+                                if !portraitHint.isEmpty {
+                                    Text(portraitHint).font(.system(size: 10)).foregroundStyle(.orange)
+                                }
+                                Text("从免费真人肖像库生成一张写实人脸（按角色气质选风格）；也可以上传自己的图片。")
+                                    .font(.system(size: 10)).foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                }
+
                 Section("基本") {
                     HStack(spacing: 12) {
-                        Monogram(text: draft.name.isEmpty ? "角" : draft.name, colorHex: draft.colorHex, size: 44)
+                        Monogram(text: draft.name.isEmpty ? "角" : draft.name, colorHex: draft.colorHex, size: 44, portraitPath: draft.portraitPath)
                         VStack(alignment: .leading, spacing: 8) {
                             TextField("角色名称", text: $draft.name)
                                 .textFieldStyle(.plain)
@@ -137,6 +180,42 @@ struct CharacterEditorSheet: View {
         draft.persona = t.persona
         draft.scenario = t.scenario
         draft.greeting = draft.greeting.isEmpty ? t.greeting : draft.greeting
+    }
+
+    private func generatePortrait(regenerate: Bool = false) {
+        portraitBusy = true
+        portraitHint = ""
+        portraitStatus = "正在生成…"
+        Task {
+            let (data, resultJSON) = await PortraitService.generate(character: draft, regenerate: regenerate)
+            portraitBusy = false
+            if let data {
+                let ext: String = data.prefix(3).elementsEqual([0xFF, 0xD8, 0xFF]) ? "jpg" : "png"
+                if let name = store.savePortrait(data, ext: ext) {
+                    draft.portraitPath = name
+                    portraitHint = ""
+                } else {
+                    portraitHint = "保存失败"
+                }
+            } else {
+                if let data = resultJSON.data(using: .utf8),
+                   let r = try? JSONDecoder().decode(PortraitService.Result.self, from: data) {
+                    portraitHint = r.detail ?? "生成失败"
+                } else { portraitHint = "生成失败" }
+            }
+        }
+    }
+
+    private func pickPortrait() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.begin { r in
+            guard r == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
+            let ext = url.pathExtension.isEmpty ? "png" : url.pathExtension
+            if let name = store.savePortrait(data, ext: ext) {
+                draft.portraitPath = name
+            }
+        }
     }
 
     private func save() {
@@ -353,7 +432,7 @@ struct GroupSetupSheet: View {
             }
         } label: {
             HStack(spacing: 10) {
-                Monogram(text: c.name, colorHex: c.colorHex, size: 26)
+                Monogram(text: c.name, colorHex: c.colorHex, size: 26, portraitPath: c.portraitPath)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(c.displayName)
                         .font(.system(size: 13, weight: .medium))

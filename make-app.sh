@@ -101,50 +101,108 @@ import CoreGraphics
 import ImageIO
 import AppKit
 
-let size = 1024
+// Aura 图标：深邃夜空渐变 + 柔光 + 轨道环 + 极简星芒 A
+let S: CGFloat = 1024
 let cs = CGColorSpace(name: CGColorSpace.sRGB)!
-let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
+let ctx = CGContext(data: nil, width: Int(S), height: Int(S), bitsPerComponent: 8, bytesPerRow: 0,
                     space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
 
-// 背景：圆角矩形（Apple 图标网格：约 10% 边距，约 22.5% 圆角）
-let inset: CGFloat = 100
-let rect = CGRect(x: inset, y: inset, width: CGFloat(size) - inset * 2, height: CGFloat(size) - inset * 2)
-let radius: CGFloat = 200
-let bgPath = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
-
-// 主题渐变：靛蓝 → 紫罗兰
-let colors = [
-    CGColor(red: 0.357, green: 0.553, blue: 0.937, alpha: 1),   // #5B8DEF
-    CGColor(red: 0.486, green: 0.416, blue: 0.941, alpha: 1)    // #7C6AF0
-] as CFArray
+// 背景圆角方（Apple 图标网格）
+let inset: CGFloat = 96
+let rect = CGRect(x: inset, y: inset, width: S - inset * 2, height: S - inset * 2)
+let bgPath = CGPath(roundedRect: rect, cornerWidth: 224, cornerHeight: 224, transform: nil)
 ctx.saveGState()
 ctx.addPath(bgPath)
 ctx.clip()
-let gradient = CGGradient(colorsSpace: cs, colors: colors, locations: [0, 1])!
-ctx.drawLinearGradient(gradient, start: CGPoint(x: inset, y: CGFloat(size) - inset), end: CGPoint(x: CGFloat(size) - inset, y: inset), options: [])
 
-// 左上柔光
-ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.10))
-ctx.fillEllipse(in: CGRect(x: -100, y: 520, width: 700, height: 700))
+// 深空主渐变：深靛蓝 → 紫罗兰
+let bgColors = [
+    CGColor(red: 0.055, green: 0.086, blue: 0.208, alpha: 1),
+    CGColor(red: 0.16, green: 0.13, blue: 0.38, alpha: 1),
+    CGColor(red: 0.36, green: 0.30, blue: 0.72, alpha: 1)
+] as CFArray
+let bgGrad = CGGradient(colorsSpace: cs, colors: bgColors, locations: [0, 0.55, 1])!
+ctx.drawLinearGradient(bgGrad, start: CGPoint(x: inset, y: S - inset), end: CGPoint(x: S - inset, y: inset), options: [])
 
-// 中央 "A" 字标（圆体，白色，微投影）
+// 中心柔光（发光核心）
+let glow = CGGradient(colorsSpace: cs, colors: [
+    CGColor(red: 0.45, green: 0.62, blue: 1.0, alpha: 0.42),
+    CGColor(red: 0.45, green: 0.62, blue: 1.0, alpha: 0)
+] as CFArray, locations: [0, 1])!
+ctx.drawRadialGradient(glow,
+    startCenter: CGPoint(x: S/2, y: S/2), startRadius: 40,
+    endCenter: CGPoint(x: S/2, y: S/2), endRadius: 440, options: [])
+// 左下冷光点缀
+let glow2 = CGGradient(colorsSpace: cs, colors: [
+    CGColor(red: 0.72, green: 0.45, blue: 1.0, alpha: 0.22),
+    CGColor(red: 0.72, green: 0.45, blue: 1.0, alpha: 0)
+] as CFArray, locations: [0, 1])!
+ctx.drawRadialGradient(glow2,
+    startCenter: CGPoint(x: 220, y: 120), startRadius: 10,
+    endCenter: CGPoint(x: 220, y: 120), endRadius: 380, options: [])
+
+let cx = S / 2
+let cy = S / 2
+
+// 轨道环：两道细椭圆弧，暗示"围绕角色的思维轨迹"
+ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.28))
+ctx.setLineWidth(5)
+let ring1 = CGRect(x: cx - 300, y: cy - 300, width: 600, height: 600)
+ctx.addEllipse(in: ring1)
+ctx.strokePath()
+ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.12))
+ctx.setLineWidth(3)
+let ring2 = CGRect(x: cx - 385, y: cy - 235, width: 770, height: 470)
+ctx.addEllipse(in: ring2)
+ctx.strokePath()
+
+// 星芒：四点光芒（线性渐变三角）
+func spike(center: CGPoint, length: CGFloat, width: CGFloat, rotation: CGFloat, alpha: CGFloat) {
+    ctx.saveGState()
+    ctx.translateBy(x: center.x, y: center.y)
+    ctx.rotate(by: rotation)
+    let grad = CGGradient(colorsSpace: cs, colors: [
+        CGColor(red: 1, green: 1, blue: 1, alpha: alpha),
+        CGColor(red: 1, green: 1, blue: 1, alpha: 0)
+    ] as CFArray, locations: [0, 1])!
+    ctx.drawLinearGradient(grad, start: .zero, end: CGPoint(x: 0, y: length), options: [])
+    ctx.beginPath()
+    ctx.move(to: CGPoint(x: 0, y: length))
+    ctx.addLine(to: CGPoint(x: -width, y: 0))
+    ctx.addLine(to: CGPoint(x: width, y: 0))
+    ctx.closePath()
+    ctx.fillPath()
+    ctx.restoreGState()
+}
+for r in stride(from: 0, to: CGFloat.pi * 2, by: CGFloat.pi / 4) {
+    spike(center: CGPoint(x: cx, y: cy), length: 420, width: 18, rotation: r, alpha: 0.16)
+}
+
+// 极简 A 字标：圆体 + 微光
 let par = NSMutableParagraphStyle()
 par.alignment = .center
-let attrs: [NSAttributedString.Key: Any] = [
-    .font: NSFont.systemFont(ofSize: 560, weight: .bold),
+let font = NSFont.systemFont(ofSize: 500, weight: .semibold)
+let str = NSAttributedString(string: "A", attributes: [
+    .font: font,
     .foregroundColor: NSColor.white,
     .paragraphStyle: par
-]
-let str = NSAttributedString(string: "A", attributes: attrs)
+])
 let line = CTLineCreateWithAttributedString(str)
-let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
-ctx.setShadow(offset: CGSize(width: 0, height: -8), blur: 24, color: CGColor(red: 0, green: 0, blue: 0.3, alpha: 0.35))
-ctx.textPosition = CGPoint(x: CGFloat(size)/2 - bounds.width/2, y: CGFloat(size)/2 - bounds.midY)
+let b = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
+ctx.setShadow(offset: CGSize(width: 0, height: -6), blur: 30, color: CGColor(red: 0.55, green: 0.65, blue: 1, alpha: 0.55))
+ctx.textPosition = CGPoint(x: cx - b.width / 2, y: cy - b.midY - 10)
 CTLineDraw(line, ctx)
 ctx.restoreGState()
 
+// 顶部高光描边
+ctx.saveGState()
+ctx.addPath(bgPath)
+ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.22))
+ctx.setLineWidth(3)
+ctx.strokePath()
+ctx.restoreGState()
+
 guard let img = ctx.makeImage() else { fatalError("渲染失败") }
-// 脚本在 .build 目录内执行（make-app.sh 中 cd .build）
 let outURL = URL(fileURLWithPath: "icon_1024.png")
 let dest = CGImageDestinationCreateWithURL(outURL as CFURL, "public.png" as CFString, 1, nil)!
 CGImageDestinationAddImage(dest, img, nil)

@@ -19,13 +19,20 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            HStack {
-                Text("角色")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .tracking(1)
-                Spacer()
-                Button {
+            ZStack(alignment: .topTrailing) {
+                AmbientGlow(color: .blue, radius: 200, opacity: 0.10)
+                    .offset(x: 60, y: -40)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Aura")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        Text("角色")
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.tertiary)
+                            .tracking(1)
+                    }
+                    Spacer()
+                    Button {
                     store.beginNewCharacter()
                 } label: {
                     Image(systemName: "plus")
@@ -33,14 +40,24 @@ struct SidebarView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("新建角色")
+                }
             }
 
-            TextField("搜索角色", text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(.quaternary, in: .rect(cornerRadius: 8))
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                TextField("搜索角色", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12.5))
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+            }
 
             List(
                 selection: Binding(
@@ -81,12 +98,7 @@ struct SidebarView: View {
                 Spacer()
 
                 if store.settings.demoMode {
-                    Text("演示模式")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2.5)
-                        .background(.orange.opacity(0.12), in: .capsule)
+                    StatusBadge(text: "演示模式", color: .orange, systemImage: "wand.and.stars")
                 }
             }
             .padding(.bottom, 6)
@@ -128,7 +140,7 @@ private struct SidebarRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Monogram(text: character.name, colorHex: character.colorHex, size: 22)
+            Monogram(text: character.name, colorHex: character.colorHex, size: 22, portraitPath: character.portraitPath)
             VStack(alignment: .leading, spacing: 1) {
                 Text(character.displayName)
                     .font(.system(size: 13, weight: .medium))
