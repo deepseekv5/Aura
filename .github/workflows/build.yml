@@ -31,8 +31,7 @@ jobs:
           # 单一版本源：VERSION 必须与 app bundle 一致，防止更新循环
           VER="$(cat VERSION)"
           echo "VERSION=$VER"
-          # 构建后校验 bundle 版本（见下方 Build 步骤之后）
-          echo "$VER" > .build/expected-version
+          # 构建后校验 bundle 版本（见下方 Build 步骤）
 
       - name: Build Aura.app
         run: |
