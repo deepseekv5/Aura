@@ -1,4 +1,4 @@
-# AI 角色模拟 · for Mac
+# Aura · AI 角色工坊 for Mac
 
 macOS 原生 SwiftUI 应用：自由创建 AI 角色、随时对话；角色在对话中**自己写入 / 创建 / 检索长期记忆**（OpenAI 兼容 API，可完全自定义）。UI 遵循 macOS 26 液态玻璃设计，极简黑白灰。
 
@@ -21,6 +21,9 @@ macOS 原生 SwiftUI 应用：自由创建 AI 角色、随时对话；角色在�
 - **全局搜索**：`⌘K` 跨角色搜索对话与记忆。
 - **演示模式**：默认开启，无需 API Key 即可体验完整链路（本地模拟流式回复 + 记忆写入）。
 - **快捷键**：⌘N 新建角色 · ⌘⇧N 新对话 · ⌘⇧G 新多人对话 · ⌘⇧M 记忆面板 · ⌘K 全局搜索 · ⌘↩ 发送 · ⌘, 设置。
+- **语音输入**：输入条麦克风按钮，Mac 原生 Speech 框架听写（中文优先），说话转文字填入输入框
+- **打电话**：对角色说「打电话给张三」或「拨打 10086」，按通讯录姓名查找号码后经系统 iPhone 接续拨出（需同 iCloud 的 iPhone）；打开网址、读剪贴板、查电脑状态一应俱全
+- **屏幕读取密码保护**：设置 → 通用 → 屏幕读取，开启需设置密码；重启后需重新解锁
 - 无 emoji 设计：头像用名字首字 + 主题色；AI 回复默认过滤 emoji（可全局/按角色关闭）。
 
 ## 构建与运行
@@ -29,7 +32,7 @@ macOS 原生 SwiftUI 应用：自由创建 AI 角色、随时对话；角色在�
 ./make-app.sh
 ```
 
-生成 `dist/AI 角色模拟.app` 并自动启动。要求 macOS 26+ 与 Command Line Tools（无需完整 Xcode）。
+生成 `dist/Aura.app` 并自动启动。要求 macOS 26+ 与 Command Line Tools（无需完整 Xcode）。
 
 > 构建说明：本机 CLT 未携带 SwiftUI 宏插件（libSwiftUIMacros.dylib），`make-app.sh` 会自动生成一份「影子 SDK」（APFS 克隆系统 SDK 并剥离 SwiftUICore 接口中的外部宏声明，使 `@State` 等回退到传统 propertyWrapper 实现），再用 `swiftc` 直接编译全部源文件——全程零第三方依赖、无需 SwiftPM。若安装了完整 Xcode，`Package.swift` 亦可正常使用。
 
