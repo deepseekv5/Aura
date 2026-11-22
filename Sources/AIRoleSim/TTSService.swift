@@ -137,7 +137,7 @@ final class AudioPlayerManager: NSObject, ObservableObject {
         do {
             if settings.demoMode {
                 // 演示模式：系统语音兜底，真实可听
-                speakSystem(text: message.content, id: id)
+                speakSystem(text: message.content, id: id, rate: settings.speechRate)
                 return
             }
             guard !settings.ttsAPIKey.isEmpty else {
@@ -187,10 +187,10 @@ final class AudioPlayerManager: NSObject, ObservableObject {
         }
     }
 
-    private func speakSystem(text: String, id: UUID) {
+    private func speakSystem(text: String, id: UUID, rate: Double) {
         let u = AVSpeechUtterance(string: text)
         u.voice = AVSpeechSynthesisVoice(language: "zh-CN")
-        u.rate = 0.5
+        u.rate = Float(rate)
         speakingMessageID = id
         synthesizer.speak(u)
     }

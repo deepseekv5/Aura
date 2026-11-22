@@ -2,6 +2,8 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject var store: AppStore
+    /// 首次启动法律同意（版本 v1.0）
+    @State private var showLegalConsent = false
 
     var body: some View {
         NavigationSplitView {
@@ -26,6 +28,17 @@ struct RootView: View {
         }
         .sheet(isPresented: $store.showSearch) {
             GlobalSearchSheet()
+        }
+        .sheet(isPresented: $showLegalConsent) {
+            LegalConsentView {
+                store.settings.legalConsentVersion = "1.0"
+                showLegalConsent = false
+            }
+        }
+        .onAppear {
+            if store.settings.legalConsentVersion.isEmpty {
+                showLegalConsent = true
+            }
         }
     }
 }

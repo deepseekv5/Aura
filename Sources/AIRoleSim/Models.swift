@@ -128,6 +128,7 @@ struct Conversation: Identifiable, Codable, Hashable {
     var messages: [ChatMessage] = []
     var isGroup: Bool = false
     var groupMemberIDs: [UUID] = []
+    var pinned: Bool = false
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 }
@@ -194,6 +195,10 @@ struct AppSettings: Codable {
     var noEmojiReplies: Bool = true
     /// 每轮注入的记忆条数
     var memoryTopK: Int = 8
+    /// 全局强调色（十六进制），空表示系统默认
+    var accentColorHex: String = ""
+    /// 朗读语速 0.4-1.0
+    var speechRate: Double = 0.5
 
     // MiMo TTS 语音朗读
     var ttsAuto: Bool = false
@@ -203,6 +208,9 @@ struct AppSettings: Codable {
     /// 仅 voicedesign 模型使用
     var ttsVoiceDesign: String = ""
     var ttsFormat: String = "mp3"
+
+    // 法律合规：已同意的协议版本（空表示未同意）
+    var legalConsentVersion: String = ""
 
     // 屏幕读取
     var screenEnabled: Bool = false
@@ -231,7 +239,8 @@ struct AppSettings: Codable {
     private enum CodingKeys: String, CodingKey {
         case profiles, activeProfileID, demoMode, userName, userBio, noEmojiReplies, memoryTopK
         case ttsAuto, ttsAPIKey, ttsModel, ttsVoice, ttsVoiceDesign, ttsFormat
-        case screenEnabled, screenMode, screenPasswordSalt, screenPasswordHash
+        case accentColorHex, speechRate
+        case screenEnabled, screenMode, screenPasswordSalt, screenPasswordHash, legalConsentVersion
     }
 
     // 兼容旧版配置文件：缺失字段回退默认值
@@ -254,6 +263,7 @@ struct AppSettings: Codable {
         screenMode = try c.decodeIfPresent(String.self, forKey: .screenMode) ?? "full"
         screenPasswordSalt = try c.decodeIfPresent(String.self, forKey: .screenPasswordSalt) ?? ""
         screenPasswordHash = try c.decodeIfPresent(String.self, forKey: .screenPasswordHash) ?? ""
+        legalConsentVersion = try c.decodeIfPresent(String.self, forKey: .legalConsentVersion) ?? ""
     }
 
     init() {}

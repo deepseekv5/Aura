@@ -188,7 +188,10 @@ final class AppStore: ObservableObject {
     func conversations(for characterID: UUID) -> [Conversation] {
         conversations
             .filter { $0.characterID == characterID }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .sorted { a, b in
+                if a.pinned != b.pinned { return a.pinned }
+                return a.updatedAt > b.updatedAt
+            }
     }
 
     func conversation(id: UUID?) -> Conversation? {
@@ -482,5 +485,50 @@ final class AppStore: ObservableObject {
 
     func openDataFolder() {
         NSWorkspace.shared.open(dataDir)
+    }
+
+    /// 导出全部用户数据为 JSON（不含图片二进制，仅文件名；含全部设置）
+    func exportAllData() -> Data? {
+        let payload: [String: Any] = [
+            "version": 1,
+            "exportedAt": ISO8601DateFormatter().string(from: Date()),
+            "settings": (try? JSONEncoder().encode(settings)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? [:],
+            "characters": (try? JSONEncoder().encode(characters)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? [],
+            "conversations": (try? JSONEncoder().encode(conversations)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? [],
+            "memories": (try? JSONEncoder().encode(memories)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? []
+        ]
+        return try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+    }
+
+    /// 从导出的 JSON 恢复数据（覆盖当前数据）
+    func importAllData(_ data: Data) -> Bool {
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let ch = obj["characters"] as? [[String: Any]],
+              let co = obj["conversations"] as? [[String: Any]],
+              let me = obj["memories"] as? [[String: Any]] else { return false }
+        let d1 = (try? JSONSerialization.data(withJSONObject: ch)) ?? Data()
+        let d2 = (try? JSONSerialization.data(withJSONObject: co)) ?? Data()
+        let d3 = (try? JSONSerialization.data(withJSONObject: me)) ?? Data()
+        guard let newChars = try? decoder.decode([RoleProfile].self, from: d1),
+              let newConvos = try? decoder.decode([Conversation].self, from: d2),
+              let newMems = try? decoder.decode([MemoryEntry].self, from: d3) else { return false }
+        characters = newChars
+        conversations = newConvos
+        memories = newMems
+        if let setObj = obj["settings"] as? [String: Any],
+           let sd = try? JSONSerialization.data(withJSONObject: setObj),
+           let newSettings = try? decoder.decode(AppSettings.self, from: sd) {
+            settings = newSettings
+        }
+        persistCharacters(); persistConversations(); persistMemories()
+        return true
+    }
+
+    /// 切换会话置顶
+    func toggleConversationPin(_ id: UUID) {
+        if let i = conversations.firstIndex(where: { $0.id == id }) {
+            conversations[i].pinned.toggle()
+            persistConversations()
+        }
     }
 }

@@ -189,6 +189,29 @@ struct SettingsView: View {
         .padding(.vertical, 4)
     }
 
+    @State private var dataStatus: String?
+
+    private func exportData() {
+        guard let data = store.exportAllData() else { dataStatus = "导出失败"; return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "Aura-backup-\(ISO8601DateFormatter().string(from: Date()).prefix(10)).json"
+        panel.begin { r in
+            guard r == .OK, let url = panel.url else { return }
+            try? data.write(to: url)
+            dataStatus = "已导出"
+        }
+    }
+
+    private func importData() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.begin { r in
+            guard r == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
+            dataStatus = store.importAllData(data) ? "导入成功" : "格式无效"
+        }
+    }
+
     // MARK: 屏幕读取密码
 
     private var passwordSheet: some View {
@@ -292,6 +315,22 @@ struct SettingsView: View {
             Section("表达与记忆") {
                 Toggle("全局避免角色回复 emoji（角色可单独覆盖）", isOn: $store.settings.noEmojiReplies)
                 Stepper("每轮注入记忆条数：\(store.settings.memoryTopK)", value: $store.settings.memoryTopK, in: 4...16)
+                Picker("强调色", selection: $store.settings.accentColorHex) {
+                    Text("系统默认").tag("")
+                    ForEach(Palette.swatches, id: \.self) { hex in
+                        HStack {
+                            Circle().fill(Color(hex: hex)).frame(width: 14, height: 14)
+                            Text(hex).font(.system(size: 11))
+                        }.tag(hex)
+                    }
+                }
+                LabeledContent("朗读语速") {
+                    Slider(value: $store.settings.speechRate, in: 0.3...1.0, step: 0.05)
+                    Text(String(format: "%.2f", store.settings.speechRate))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34)
+                }
             }
 
             Section("数据") {
@@ -304,6 +343,15 @@ struct SettingsView: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(2)
                     .textSelection(.enabled)
+                HStack {
+                    Button("导出全部数据") { exportData() }
+                        .controlSize(.small)
+                    Button("导入数据") { importData() }
+                        .controlSize(.small)
+                    if let s = dataStatus {
+                        Text(s).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
             }
         }
         .formStyle(.grouped)

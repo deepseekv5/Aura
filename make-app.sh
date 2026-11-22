@@ -16,15 +16,24 @@ ICON_DIR=".build/AppIcon.iconset"
 ICNS=".build/AppIcon.icns"
 mkdir -p .build "$DIST"
 
-# 系统默认 SDK（符号链接，取真实路径）
-SDK_REAL="$(cd /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk && pwd)"
+# SDK 选择：完整 Xcode（含 SwiftUIMacros 宏插件）优先，否则本机 CLT + 影子 SDK
+XCODE_SDK="$(xcodebuild -version >/dev/null 2>&1 && xcrun --show-sdk-path 2>/dev/null || true)"
+if [ -n "$XCODE_SDK" ] && [ -d "$XCODE_SDK" ]; then
+    echo "==> 检测到完整 Xcode，使用系统 SDK：$XCODE_SDK"
+    BUILD_SDK="$XCODE_SDK"
+    USE_SHADOW=0
+else
+    SDK_REAL="$(cd /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk && pwd)"
+    BUILD_SDK=""
+    USE_SHADOW=1
+fi
 
 # ---- 1) 影子 SDK ----
 # 本机 CLT 未携带 libSwiftUIMacros.dylib，SwiftUI/SwiftUICore 接口中的外部宏无法展开。
 # 解决：克隆 SDK 并剥离接口中的 #externalMacro 宏声明，使 @State 等回退到传统 propertyWrapper 实现。
 SDK_STAMP="$SHADOW/.sdk-source"
-if [ ! -f "$SHADOW/System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64e-apple-macos.swiftinterface" ] \
-   || [ ! -f "$SDK_STAMP" ] || [ "$(cat "$SDK_STAMP" 2>/dev/null)" != "$SDK_REAL" ]; then
+if [ "$USE_SHADOW" = "1" ] && { [ ! -f "$SHADOW/System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64e-apple-macos.swiftinterface" ] \
+   || [ ! -f "$SDK_STAMP" ] || [ "$(cat "$SDK_STAMP" 2>/dev/null)" != "$SDK_REAL" ]; }; then
     echo "==> 生成影子 SDK（剥离 SwiftUI 宏声明）→ $SHADOW"
     rm -rf "$SHADOW"
     mkdir -p "$SHADOW"
@@ -140,7 +149,8 @@ CGImageDestinationAddImage(dest, img, nil)
 CGImageDestinationFinalize(dest)
 print("icon_1024.png 完成")
 SWIFT
-    swiftc -swift-version 5 -sdk "$SHADOW" -module-cache-path "$MCACHE" -target arm64-apple-macos26.0 -o .build/make_icon .build/make_icon.swift
+    ICON_SDK="${BUILD_SDK:-$SHADOW}"
+    swiftc -swift-version 5 -sdk "$ICON_SDK" -module-cache-path "$MCACHE" -target arm64-apple-macos26.0 -o .build/make_icon .build/make_icon.swift
     (cd .build && ./make_icon)
     # 生成全尺寸 iconset
     rm -rf "$ICON_DIR"; mkdir -p "$ICON_DIR"
@@ -158,7 +168,7 @@ fi
 echo "==> swiftc -O 编译（Swift 5 语言模式，target macOS 26.0）"
 swiftc -O \
     -swift-version 5 \
-    -sdk "$SHADOW" \
+    -sdk "${BUILD_SDK:-$SHADOW}" \
     -module-cache-path "$MCACHE" \
     -target arm64-apple-macos26.0 \
     -parse-as-library \
@@ -222,6 +232,10 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 echo "==> ad-hoc 签名"
 codesign --force --sign - "$APP" 2>/dev/null || true
 
-echo "==> 启动 $APP"
-open "$APP"
-echo "完成。应用位于 $APP"
+if [ "${SKIP_LAUNCH:-0}" = "1" ]; then
+    echo "SKIP_LAUNCH=1，跳过启动。应用位于 $APP"
+else
+    echo "==> 启动 $APP"
+    open "$APP"
+    echo "完成。应用位于 $APP"
+fi
