@@ -26,11 +26,22 @@ jobs:
           xcodebuild -version || true
           swift --version
 
+      - name: Verify version consistency
+        run: |
+          # 单一版本源：VERSION 必须与 app bundle 一致，防止更新循环
+          VER="$(cat VERSION)"
+          echo "VERSION=$VER"
+          # 构建后校验 bundle 版本（见下方 Build 步骤之后）
+          echo "$VER" > .build/expected-version
+
       - name: Build Aura.app
         run: |
           chmod +x ./make-app.sh
-          # 在 CI 中不启动应用（make-app.sh 末尾有 open），此处用环境变量跳过
           SKIP_LAUNCH=1 ./make-app.sh
+          # 校验 bundle 版本 == VERSION
+          BVER="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' dist/Aura.app/Contents/Info.plist)"
+          echo "bundle=$BVER expected=$(cat VERSION)"
+          test "$BVER" = "$(cat VERSION)" || { echo "版本不一致！bundle=$BVER VERSION=$(cat VERSION)"; exit 1; }
 
       - name: Package app
         run: |

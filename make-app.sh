@@ -4,6 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# 单一版本源：VERSION 文件（避免 bundle/源码/Release 版本号错位导致反复提示更新）
+APP_VERSION="$(cat VERSION 2>/dev/null || echo '1.2.3')"
 APP_NAME="Aura"
 BUNDLE_ID="com.aura.mac"
 EXEC="Aura"
@@ -203,9 +205,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.2.0</string>
+    <string>$APP_VERSION</string>
     <key>CFBundleVersion</key>
-    <string>5</string>
+    <string>6</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
