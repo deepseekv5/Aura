@@ -14,7 +14,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    # 必须使用 macOS 26+ runner：Liquid Glass（glassEffect）API 需要 macOS 26 SDK
+    runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v4
