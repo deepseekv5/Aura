@@ -32,7 +32,7 @@ enum UpdateService {
     }
 
     static let repo = "deepseekv5/Aura"
-    static let currentVersion = "1.1.1"
+    static let currentVersion = "1.2.0"
 
     /// 检查更新（仅访问固定 GitHub API 主机，HTTPS）
     static func check() async throws -> UpdateInfo? {
