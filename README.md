@@ -62,3 +62,22 @@ macOS 原生 SwiftUI 应用：自由创建 AI 角色、随时对话；角色在�
 - 供应商需支持 OpenAI `tools` 参数才能自动记忆；不支持时可在角色编辑器中关闭「自动管理记忆」（手动记忆功能不受影响）。
 - 记忆检索为关键词 + 重要性 + 时间打分（零配置），未用向量语义检索。
 - 未签名/未公证（本地 ad-hoc 签名），首次打开若被 Gatekeeper 拦截：右键 → 打开。
+
+
+## 法律合规
+
+本项目遵守中华人民共和国法律法规，适配《个人信息保护法》《网络安全法》《数据安全法》《生成式人工智能服务管理暂行办法》：
+
+- [用户服务协议](TERMS.md) — 首次启动须阅读并同意
+- [隐私政策](PRIVACY.md) — 全本地存储，无服务器，第三方 API 由用户自行配置与负责
+
+应用内首次启动会弹出协议同意页（勾选后方可使用），同意版本持久化；未来协议更新会再次征求同意。
+
+## GitHub Actions 自动构建
+
+`.github/workflows/build.yml` 配置：
+
+- `push` / `PR` 到 main：自动在 `macos-26` runner 构建 Aura.app，上传 artifact（构建产物保留 90 天）
+- 发布 GitHub Release 时：自动将 `Aura-macOS.zip` 上传到对应 Release
+
+> 必须使用 macOS 26+ runner：Liquid Glass（`glassEffect`）API 需要 macOS 26 SDK。
