@@ -19,20 +19,17 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            ZStack(alignment: .topTrailing) {
-                AmbientGlow(color: .blue, radius: 200, opacity: 0.10)
-                    .offset(x: 60, y: -40)
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Aura")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        Text("角色")
-                            .font(.system(size: 9.5))
-                            .foregroundStyle(.tertiary)
-                            .tracking(1)
-                    }
-                    Spacer()
-                    Button {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Aura")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    Text("角色")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                        .tracking(1)
+                }
+                Spacer()
+                Button {
                     store.beginNewCharacter()
                 } label: {
                     Image(systemName: "plus")
@@ -40,7 +37,11 @@ struct SidebarView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("新建角色")
-                }
+            }
+            // 光晕作为背景附加，不参与布局（避免撑高侧栏头部挤压列表）
+            .background(alignment: .topTrailing) {
+                AmbientGlow(color: .blue, radius: 140, opacity: 0.08)
+                    .offset(x: 40, y: -30)
             }
 
             HStack(spacing: 6) {

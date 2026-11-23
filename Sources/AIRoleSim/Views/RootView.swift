@@ -102,14 +102,7 @@ struct CharacterLanding: View {
     let character: RoleProfile
 
     var body: some View {
-        ZStack {
-            // 背景光晕
-            AmbientGlow(color: Color(hex: character.colorHex), radius: 420, opacity: 0.12)
-                .offset(x: -280, y: -180)
-            AmbientGlow(color: .purple, radius: 320, opacity: 0.08)
-                .offset(x: 320, y: 220)
-
-            VStack(spacing: 16) {
+        VStack(spacing: 16) {
             Spacer()
             ZStack {
                 Circle()
@@ -155,10 +148,14 @@ struct CharacterLanding: View {
                     .buttonStyle(.glass)
             }
             Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+            AmbientGlow(color: Color(hex: character.colorHex), radius: 380, opacity: 0.10)
+                .offset(x: -260, y: -160)
+            AmbientGlow(color: .purple, radius: 300, opacity: 0.07)
+                .offset(x: 280, y: 180)
+        }
     }
 }
 
@@ -166,13 +163,7 @@ struct EmptyLanding: View {
     @EnvironmentObject var store: AppStore
 
     var body: some View {
-        ZStack {
-            AmbientGlow(color: .blue, radius: 460, opacity: 0.10)
-                .offset(x: -260, y: -160)
-            AmbientGlow(color: .purple, radius: 360, opacity: 0.08)
-                .offset(x: 300, y: 200)
-
-            VStack(spacing: 12) {
+        VStack(spacing: 12) {
             Spacer()
             ZStack {
                 Circle()
@@ -196,9 +187,13 @@ struct EmptyLanding: View {
                 .buttonStyle(.glassProminent)
                 .padding(.top, 6)
             Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+            AmbientGlow(color: .blue, radius: 400, opacity: 0.09)
+                .offset(x: -240, y: -150)
+            AmbientGlow(color: .purple, radius: 320, opacity: 0.07)
+                .offset(x: 280, y: 180)
+        }
     }
 }
