@@ -18,8 +18,8 @@ struct SettingsView: View {
             case .api: return "network"
             case .voice: return "speaker.wave.2"
             case .general: return "gearshape"
-            case .privacy: return "hand.raised.shield"
-            case .data: return "externaldrive.backup"
+            case .privacy: return "lock.shield"
+            case .data: return "externaldrive"
             case .about: return "book.closed"
             }
         }
